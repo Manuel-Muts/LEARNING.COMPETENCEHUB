@@ -13,15 +13,26 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000). Use `npm run build` to
 create a production build and `npm run start` to serve it.
 
+## Deploy to Netlify
+
+The Netlify configuration is in `docs/netlify.toml`. Configure the Netlify site
+to use `docs` as its base directory and `docs/netlify.toml` as its config file.
+The config builds the Next.js app with the Netlify Next.js plugin.
+
+Set `NEXT_PUBLIC_API_URL` in the Netlify site's environment variables to the
+deployed API base URL, including `/api/v1`, and configure the backend to allow
+the Netlify site's origin in its production CORS settings.
+
 ## Pages
 
-- `/` — learner dashboard with Overview, My learning, Past Papers, My progress, and
-  Study planner sections. The planner, dashboard tab, and grade/subject
-  selection are saved in browser storage for this pre-login preview.
+- `/` — sends visitors to the sign-in page, in both local development and production.
+- `/dashboard` — learner dashboard with Overview, My learning, Past Papers, My progress,
+  and Study planner sections. The planner, dashboard tab, and grade/subject selection
+  are saved in browser storage.
 - `/login` — learner sign-in interface.
 - `/signup` — learner account creation interface.
 - `/forgot-password` — phone-based password reset interface.
-- `/dashboard` — redirects to the learner dashboard.
+- `/admin` — admin sign-in and dashboard for past-paper uploads and registered accounts.
 - `/learn/[grade]/[subject]` — starter practice preview for the selected grade and subject.
 - `/past-papers/[grade]/[subject]` — available past-paper PDFs for the selected grade and subject, with download links.
 - `/demo/math-numbers` — standalone mathematics demo practice.
@@ -33,7 +44,9 @@ create a production build and `npm run start` to serve it.
 The login and sign-up pages submit to the FastAPI service. Set
 `NEXT_PUBLIC_API_URL` in `docs/.env.local` to the API base URL (for local
 development, `http://localhost:8000/api/v1`). The browser sends requests with
-credentials enabled so the API can set its HTTP-only session cookie.
+credentials enabled so the API can set its HTTP-only session cookie. The API
+always allows the two local frontend origins `http://localhost:3000` and
+`http://127.0.0.1:3000`, even when `CORS_ORIGINS` is overridden for production.
 
 Create a virtual environment and install the backend requirements:
 
@@ -68,6 +81,41 @@ installed, apply the question-generation usage migration as well:
 psql -h $env:DB_HOST -p $env:DB_PORT -U $env:DB_USERNAME -d $env:DB_DATABASE -v ON_ERROR_STOP=1 -f .\backend\migrations\002_question_generation_usage.sql
 ```
 
+After migrations 001 and 002, also apply
+`backend/migrations/003_learner_practice_activity.sql` and
+`backend/migrations/004_admin_and_past_papers.sql`. After 004, apply
+`backend/migrations/005_cloudinary_documents.sql` and
+`backend/migrations/006_cloudinary_only_documents.sql` to make Cloudinary the
+only document-file storage. Migration 006 drops the unused database binary
+column and requires Cloudinary references for each paper record. Run these
+from the project root after setting the PostgreSQL connection variables:
+
+```powershell
+psql -h $env:DB_HOST -p $env:DB_PORT -U $env:DB_USERNAME -d $env:DB_DATABASE -v ON_ERROR_STOP=1 -f .\backend\migrations\003_learner_practice_activity.sql
+psql -h $env:DB_HOST -p $env:DB_PORT -U $env:DB_USERNAME -d $env:DB_DATABASE -v ON_ERROR_STOP=1 -f .\backend\migrations\004_admin_and_past_papers.sql
+psql -h $env:DB_HOST -p $env:DB_PORT -U $env:DB_USERNAME -d $env:DB_DATABASE -v ON_ERROR_STOP=1 -f .\backend\migrations\005_cloudinary_documents.sql
+psql -h $env:DB_HOST -p $env:DB_PORT -U $env:DB_USERNAME -d $env:DB_DATABASE -v ON_ERROR_STOP=1 -f .\backend\migrations\006_cloudinary_only_documents.sql
+```
+
+To seed or reset the admin account, set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in
+`backend/.env` (use a unique password of at least 12 characters), then run:
+
+```powershell
+Set-Location .\backend
+.\.venv\Scripts\Activate.ps1
+python -m app.seed_admin
+```
+
+The seed command creates the account if it does not exist and updates its
+password if it does. Admin credentials are never hard-coded in the repository.
+Open `/admin` in the frontend to sign in. Configure `CLOUDINARY_CLOUD_NAME`,
+`CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` in `backend/.env`. The admin
+dashboard accepts PDF, DOC, and DOCX files up to 20 MB; each upload is stored
+in Cloudinary and assigned the current UTC year automatically. The database
+stores document metadata and Cloudinary references, while older files already
+stored in PostgreSQL remain downloadable. The dashboard can manage uploaded
+documents and view registered guardian accounts and learner profiles.
+
 Start the API from the project root:
 
 ```powershell
@@ -75,6 +123,9 @@ Set-Location .\backend
 .\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --reload
 ```
+
+`CORS_ORIGINS` configures additional deployed frontend origins. Restart the API
+after changing its CORS configuration.
 
 From the backend directory, run the unit tests with:
 
@@ -127,20 +178,11 @@ practising. The Gemini key stays private in the backend environment.
 Apply `backend/migrations/002_question_generation_usage.sql` and then
 `backend/migrations/003_learner_practice_activity.sql` to the PostgreSQL
 database before using generation or saved practice progress.
-The Past Papers dashboard section is ready to list PDFs by grade and subject.
-No past-paper PDFs have been configured yet; add entries to
-`lib/past-papers.ts` when the files are ready, and place the PDFs under
-`public/past-papers/` so learners can download them. Entries use a grade ID,
-the subject slug, a display title, year, and public PDF URL, for example:
-
-```ts
-"grade-9": {
-  mathematics: [
-    {
-      title: "Mathematics past paper",
-      year: 2024,
-      pdfUrl: "/past-papers/grade-9/mathematics-2024.pdf",
-    },
-  ],
-}
-```
+Administrators can upload past-paper PDFs and Word documents from `/admin`.
+Uploaded papers are listed by grade and subject in the learner Past Papers
+dashboard and downloaded from Cloudinary through the API.
+Only document metadata and Cloudinary references are stored in PostgreSQL; file
+bytes are stored in Cloudinary. Uploads are kept unmodified. Browser-side PDF
+rewriting can reduce document quality or remove selectable text, and DOCX
+files are already compressed ZIP packages, so the frontend does not recompress
+these documents.

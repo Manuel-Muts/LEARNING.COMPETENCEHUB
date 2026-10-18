@@ -1,5 +1,5 @@
-import DashboardPage from "./dashboard/dashboard-view";
+import { redirect } from "next/navigation";
 
 export default function HomePage() {
-  return <DashboardPage />;
+  redirect("/login");
 }

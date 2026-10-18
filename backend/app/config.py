@@ -4,6 +4,11 @@ from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
+LOCAL_DEVELOPMENT_ORIGINS = (
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+)
+
 
 class Settings(BaseSettings):
     bb_connection: str
@@ -18,7 +23,13 @@ class Settings(BaseSettings):
     auth_cookie_secure: bool = False
     auth_cookie_samesite: str = "lax"
     auth_cookie_domain: str | None = None
-    cors_origins: str = "http://localhost:3000"
+    admin_email: str | None = None
+    admin_password: SecretStr | None = None
+    cloudinary_cloud_name: str | None = None
+    cloudinary_api_key: SecretStr | None = None
+    cloudinary_api_secret: SecretStr | None = None
+    cloudinary_folder: str = "competencehub/past-papers"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,https://learner.competencehub.co.ke"
     sms_provider: str = "disabled"
     talksasa_api_key: SecretStr | None = None
     talksasa_sender_id: str | None = None
@@ -53,7 +64,10 @@ class Settings(BaseSettings):
 
     @property
     def allowed_origins(self) -> list[str]:
-        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+        configured_origins = [
+            origin.strip() for origin in self.cors_origins.split(",") if origin.strip()
+        ]
+        return list(dict.fromkeys((*configured_origins, *LOCAL_DEVELOPMENT_ORIGINS)))
 
 
 settings = Settings()

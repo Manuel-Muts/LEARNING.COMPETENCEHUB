@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import brandIcon from "@/images/CH.png";
 import ButtonSpinner from "@/components/button-spinner";
 import {
   authApiRequest,
@@ -12,6 +14,88 @@ import {
 import { formatKenyanPhoneInput, normalizeKenyanPhoneNumber } from "@/lib/phone";
 
 type AuthMode = "login" | "signup" | "reset";
+
+const learningSlides = [
+  {
+    src: "/auth/learning-books.svg",
+    alt: "A stack of colorful books ready for a new learning adventure.",
+  },
+  {
+    src: "/auth/curious-learner.svg",
+    alt: "A learner exploring new ideas with a bright lightbulb.",
+  },
+  {
+    src: "/auth/growing-together.svg",
+    alt: "A thriving plant growing from an open book, symbolizing progress.",
+  },
+];
+
+function LearningCarousel() {
+  const [activeSlide, setActiveSlide] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+
+  useEffect(() => {
+    if (isPaused || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setActiveSlide((current) => (current + 1) % learningSlides.length);
+    }, 6000);
+    return () => window.clearInterval(interval);
+  }, [isPaused]);
+
+  function showSlide(index: number) {
+    setActiveSlide((index + learningSlides.length) % learningSlides.length);
+  }
+
+  return (
+    <div
+      className="learning-carousel"
+      role="group"
+      aria-label="Learning inspiration"
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+      onFocus={() => setIsPaused(true)}
+      onBlur={() => setIsPaused(false)}
+    >
+      <div className="learning-carousel-window">
+        <div
+          className="learning-carousel-track"
+          style={{ transform: `translateX(-${activeSlide * 100}%)` }}
+        >
+          {learningSlides.map((slide, index) => (
+            <div
+              className="learning-carousel-slide"
+              key={slide.src}
+              aria-hidden={index !== activeSlide}
+            >
+              <Image
+                alt={slide.alt}
+                className="learning-carousel-image"
+                fill
+                sizes="(max-width: 900px) 40vw, 36vw"
+                src={slide.src}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="learning-carousel-controls" aria-label="Choose an illustration">
+        {learningSlides.map((slide, index) => (
+          <button
+            aria-label={`Show illustration ${index + 1} of ${learningSlides.length}`}
+            aria-pressed={index === activeSlide}
+            className="learning-carousel-dot"
+            key={slide.src}
+            onClick={() => showSlide(index)}
+            type="button"
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function AuthScreen({ mode }: { mode: AuthMode }) {
   const router = useRouter();
@@ -117,7 +201,7 @@ export default function AuthScreen({ mode }: { mode: AuthMode }) {
         });
         setCachedAccount(account);
       }
-      router.replace(isSignup ? "/?accountCreated=1" : "/");
+      router.replace(isSignup ? "/dashboard?accountCreated=1" : "/dashboard");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to access your account.");
     } finally {
@@ -129,26 +213,21 @@ export default function AuthScreen({ mode }: { mode: AuthMode }) {
     <main className="auth-page">
       <section className="auth-visual" aria-label="Learning illustration">
         <Link className="auth-brand" href="/" aria-label="CompetenceHub home">
-          <span className="brand-mark">c</span>
-          <span><strong>competence</strong><span>HUB</span></span>
+          <Image
+            alt=""
+            aria-hidden="true"
+            className="auth-brand-icon"
+            height={44}
+            src={brandIcon}
+            width={44}
+          />
+          <span className="auth-brand-name" aria-label="CompetenceHub">
+            <span aria-hidden="true">CompetenceHub</span>
+          </span>
         </Link>
 
         <div className="auth-visual-content">
-          <div className="learning-art" aria-hidden="true">
-            <div className="art-orbit art-orbit-one" />
-            <div className="art-orbit art-orbit-two" />
-            <span className="art-spark art-spark-one">✦</span>
-            <span className="art-spark art-spark-two">✳</span>
-            <div className="art-book art-book-back" />
-            <div className="art-book art-book-front">
-              <span />
-              <span />
-              <span />
-            </div>
-            <div className="art-pencil"><span /></div>
-            <div className="art-plant"><span /><i /><i /><i /></div>
-            <div className="art-ground" />
-          </div>
+          <LearningCarousel />
           <span className="auth-kicker">A BRIGHTER WAY TO LEARN</span>
           <h1>
             {isSignup
@@ -175,8 +254,17 @@ export default function AuthScreen({ mode }: { mode: AuthMode }) {
       <section className="auth-form-side">
         <div className="auth-form-wrap">
           <Link className="auth-mobile-brand" href="/" aria-label="CompetenceHub home">
-            <span className="brand-mark">c</span>
-            <span><strong>competence</strong><span>HUB</span></span>
+            <Image
+              alt=""
+              aria-hidden="true"
+              className="auth-brand-icon"
+              height={44}
+              src={brandIcon}
+              width={44}
+            />
+            <span className="auth-brand-name" aria-label="CompetenceHub">
+              <span aria-hidden="true">CompetenceHub</span>
+            </span>
           </Link>
           <div className="auth-form-heading">
             <span className="auth-form-kicker">
@@ -386,22 +474,24 @@ export default function AuthScreen({ mode }: { mode: AuthMode }) {
               </Link>
             </p>
           )}
-          <p className="auth-back-link">
-            {isReset && resetStep === 2 ? (
-              <button
-                className="auth-inline-button"
-                onClick={() => {
-                  setResetStep(1);
-                  setMessage("");
-                }}
-                type="button"
-              >
-                ← Change contact number
-              </button>
-            ) : (
-              <Link href={isReset ? "/login" : "/"}>← {isReset ? "Back to sign in" : "Back to learning space"}</Link>
-            )}
-          </p>
+          {isReset && (
+            <p className="auth-back-link">
+              {resetStep === 2 ? (
+                <button
+                  className="auth-inline-button"
+                  onClick={() => {
+                    setResetStep(1);
+                    setMessage("");
+                  }}
+                  type="button"
+                >
+                  ← Change contact number
+                </button>
+              ) : (
+                <Link href="/login">← Back to sign in</Link>
+              )}
+            </p>
+          )}
           <p className="auth-backend-note">
             {isReset
               ? "Password recovery will be available once the TalkSasa API request details are configured."

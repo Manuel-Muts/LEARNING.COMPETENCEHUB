@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { findGrade, grades, slugifyCurriculumLabel } from "@/lib/curriculum";
-import { getPastPapers } from "@/lib/past-papers";
+import { findGrade, getPastPaperSubjects, grades, slugifyCurriculumLabel } from "@/lib/curriculum";
+import { fetchManagedPastPapers, getPastPapers, type ManagedPastPaper } from "@/lib/past-papers";
 
 const selectedGradeStorageKey = "competencehub.grade";
 
@@ -11,6 +11,8 @@ export default function PastPapersSection() {
   const [gradeId, setGradeId] = useState("");
   const [showSubjects, setShowSubjects] = useState(false);
   const [ready, setReady] = useState(false);
+  const [managedPapers, setManagedPapers] = useState<ManagedPastPaper[]>([]);
+  const [papersError, setPapersError] = useState("");
   const grade = findGrade(gradeId);
 
   useEffect(() => {
@@ -20,6 +22,11 @@ export default function PastPapersSection() {
       setShowSubjects(true);
     }
     setReady(true);
+    void fetchManagedPastPapers()
+      .then(setManagedPapers)
+      .catch((error: unknown) => {
+        setPapersError(error instanceof Error ? error.message : "Past papers could not be loaded.");
+      });
   }, []);
 
   function chooseGrade(id: string) {
@@ -94,8 +101,10 @@ export default function PastPapersSection() {
           </div>
 
           <div className="exam-subject-list">
-            {grade.subjects.map((subject) => {
-              const paperCount = getPastPapers(grade.id, subject).length;
+            {getPastPaperSubjects(grade).map((subject) => {
+              const paperCount = getPastPapers(grade.id, subject).length + managedPapers.filter(
+                (paper) => paper.gradeId === grade.id && paper.subject === subject,
+              ).length;
               return (
                 <article className="exam-subject-card" key={subject}>
                   <span className="exam-subject-icon" aria-hidden="true">▤</span>
@@ -117,6 +126,7 @@ export default function PastPapersSection() {
               );
             })}
           </div>
+          {papersError && <p className="admin-message" role="alert">{papersError}</p>}
         </div>
       ) : (
         <div className="exam-empty-state">

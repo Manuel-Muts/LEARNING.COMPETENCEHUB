@@ -1,17 +1,27 @@
+import io
+import logging
 import secrets
 import re
 from datetime import UTC, date, datetime, timedelta
+from pathlib import PurePosixPath
+from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+import cloudinary
+from cloudinary.exceptions import Error as CloudinaryError
+from cloudinary.uploader import destroy as cloudinary_destroy
+from cloudinary.uploader import upload as cloudinary_upload
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, text, update
+from fastapi.responses import RedirectResponse
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
 from app.db import get_db
+from app.document_uploads import document_filename, validate_document
 from app.gemini_questions import (
     GeminiNotConfiguredError,
     GeminiQuestionGenerationError,
@@ -19,20 +29,29 @@ from app.gemini_questions import (
 )
 from app.models import (
     AuthSession,
+    AdminAccount,
+    AdminSession,
     GeneratedPracticeQuestion,
     GuardianAccount,
     LearnerQuestionAttempt,
     LearnerQuestionGenerationUsage,
     LearnerProfile,
     PasswordResetCode,
+    PastPaperDocument,
 )
 from app.phone import normalize_kenyan_phone_number
 from app.schemas import (
     AccountResponse,
+    AdminLoginRequest,
+    AdminResponse,
+    AdminUserResponse,
     GenerateQuestionsRequest,
     GenerateQuestionsResponse,
     LoginRequest,
+    PaginatedAdminUsersResponse,
+    PaginatedPastPapersResponse,
     PasswordResetRequest,
+    PastPaperResponse,
     PhoneRequest,
     QuestionAttemptResponse,
     QuestionProgressResponse,
@@ -61,6 +80,27 @@ DUMMY_PASSWORD_HASH = (
     "$argon2id$v=19$m=65536,t=3,p=4$pSsh3SnTGS0NNx85MydG3g"
     "$T5o88aLG7gEIhrzUiwSSnJw18PLdFCE+AgoPBggsQT8"
 )
+logger = logging.getLogger(__name__)
+ADMIN_SESSION_COOKIE = "competencehub_admin_session"
+MAX_PAST_PAPER_BYTES = 20 * 1024 * 1024
+PAST_PAPERS_PAGE_SIZE = 10
+ADMIN_TABLE_PAGE_SIZE = 5
+cloudinary_is_configured = all(
+    (
+        settings.cloudinary_cloud_name,
+        settings.cloudinary_api_key
+        and settings.cloudinary_api_key.get_secret_value().strip(),
+        settings.cloudinary_api_secret
+        and settings.cloudinary_api_secret.get_secret_value().strip(),
+    )
+)
+if cloudinary_is_configured:
+    cloudinary.config(
+        cloud_name=settings.cloudinary_cloud_name,
+        api_key=settings.cloudinary_api_key.get_secret_value(),
+        api_secret=settings.cloudinary_api_secret.get_secret_value(),
+        secure=True,
+    )
 QUESTION_GENERATION_BATCH_SIZE = 5
 QUESTION_GENERATION_DAILY_LIMIT = 10
 
@@ -76,7 +116,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
@@ -131,6 +171,50 @@ def require_account(
     if account is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sign in required.")
     return account
+
+
+def require_admin(request: Request, db: Session = Depends(get_db)) -> AdminAccount:
+    token = request.cookies.get(ADMIN_SESSION_COOKIE)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin sign-in required.")
+    session = db.scalar(
+        select(AdminSession)
+        .where(
+            AdminSession.token_hash == hash_session_token(token),
+            AdminSession.revoked_at.is_(None),
+            AdminSession.expires_at > datetime.now(UTC),
+        )
+        .options(selectinload(AdminSession.admin))
+    )
+    if session is None or not session.admin.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin sign-in required.")
+    return session.admin
+
+
+def set_admin_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=ADMIN_SESSION_COOKIE,
+        value=token,
+        max_age=settings.auth_session_ttl_hours * 60 * 60,
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+        domain=settings.auth_cookie_domain,
+        path="/",
+    )
+
+
+def past_paper_response(document: PastPaperDocument) -> PastPaperResponse:
+    return PastPaperResponse(
+        id=document.id,
+        title=document.title,
+        grade_id=document.grade_id,
+        subject=document.subject,
+        year=document.year,
+        filename=document.filename,
+        content_type=document.content_type,
+        created_at=document.created_at,
+    )
 
 
 def reserve_question_generation_quota(
@@ -227,6 +311,346 @@ def saved_generated_question(
 def health(db: Session = Depends(get_db)) -> StatusResponse:
     db.execute(text("SELECT 1"))
     return StatusResponse(message="API and database are available.")
+
+
+@app.post("/api/v1/admin/login", response_model=AdminResponse)
+def admin_login(
+    payload: AdminLoginRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> AdminResponse:
+    email = str(payload.email).strip().lower()
+    admin = db.scalar(select(AdminAccount).where(AdminAccount.email == email))
+    stored_hash = admin.password_hash if admin else DUMMY_PASSWORD_HASH
+    password_matches = verify_password(payload.password, stored_hash)
+    if admin is None or not admin.is_active or not password_matches:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="The email or password is incorrect.",
+        )
+
+    token = secrets.token_urlsafe(48)
+    db.add(
+        AdminSession(
+            admin_account_id=admin.id,
+            token_hash=hash_session_token(token),
+            expires_at=datetime.now(UTC) + timedelta(hours=settings.auth_session_ttl_hours),
+        )
+    )
+    db.commit()
+    set_admin_session_cookie(response, token)
+    return AdminResponse(email=admin.email)
+
+
+@app.get("/api/v1/admin/me", response_model=AdminResponse)
+def admin_me(admin: AdminAccount = Depends(require_admin)) -> AdminResponse:
+    return AdminResponse(email=admin.email)
+
+
+@app.post("/api/v1/admin/logout", response_model=StatusResponse)
+def admin_logout(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> StatusResponse:
+    token = request.cookies.get(ADMIN_SESSION_COOKIE)
+    if token:
+        db.execute(
+            update(AdminSession)
+            .where(
+                AdminSession.token_hash == hash_session_token(token),
+                AdminSession.revoked_at.is_(None),
+            )
+            .values(revoked_at=datetime.now(UTC))
+        )
+        db.commit()
+    response.delete_cookie(
+        key=ADMIN_SESSION_COOKIE,
+        domain=settings.auth_cookie_domain,
+        path="/",
+        secure=settings.auth_cookie_secure,
+        httponly=True,
+        samesite=settings.auth_cookie_samesite,
+    )
+    return StatusResponse(message="Signed out.")
+
+
+@app.get("/api/v1/admin/users", response_model=list[AdminUserResponse])
+def admin_users(
+    _: AdminAccount = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> list[AdminUserResponse]:
+    accounts = db.scalars(
+        select(GuardianAccount)
+        .options(selectinload(GuardianAccount.learners))
+        .order_by(GuardianAccount.created_at.desc())
+    ).all()
+    return [
+        AdminUserResponse(
+            id=account.id,
+            phone=account.phone_e164,
+            email=account.email,
+            created_at=account.created_at,
+            learners=account.learners,
+        )
+        for account in accounts
+    ]
+
+
+@app.get(
+    "/api/v1/admin/users/page",
+    response_model=PaginatedAdminUsersResponse,
+)
+def admin_users_page(
+    page: int = Query(default=1, ge=1),
+    _: AdminAccount = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> PaginatedAdminUsersResponse:
+    total = db.scalar(select(func.count()).select_from(GuardianAccount)) or 0
+    accounts = db.scalars(
+        select(GuardianAccount)
+        .options(selectinload(GuardianAccount.learners))
+        .order_by(GuardianAccount.created_at.desc(), GuardianAccount.id)
+        .offset((page - 1) * ADMIN_TABLE_PAGE_SIZE)
+        .limit(ADMIN_TABLE_PAGE_SIZE)
+    ).all()
+    return PaginatedAdminUsersResponse(
+        items=[
+            AdminUserResponse(
+                id=account.id,
+                phone=account.phone_e164,
+                email=account.email,
+                created_at=account.created_at,
+                learners=account.learners,
+            )
+            for account in accounts
+        ],
+        total=total,
+        page=page,
+        page_size=ADMIN_TABLE_PAGE_SIZE,
+    )
+
+
+@app.get("/api/v1/past-papers", response_model=list[PastPaperResponse])
+def list_past_papers(
+    grade_id: str | None = Query(default=None, pattern=r"^(pg|pp[12]|grade-[1-9])$"),
+    subject: str | None = Query(default=None, min_length=1, max_length=80),
+    db: Session = Depends(get_db),
+) -> list[PastPaperResponse]:
+    statement = select(PastPaperDocument).order_by(
+        PastPaperDocument.year.desc(), PastPaperDocument.title
+    )
+    if grade_id:
+        statement = statement.where(PastPaperDocument.grade_id == grade_id)
+    if subject:
+        statement = statement.where(PastPaperDocument.subject == subject)
+    return [past_paper_response(item) for item in db.scalars(statement).all()]
+
+
+@app.get(
+    "/api/v1/past-papers/page",
+    response_model=PaginatedPastPapersResponse,
+)
+def list_past_papers_page(
+    grade_id: str = Query(pattern=r"^(pg|pp[12]|grade-[1-9])$"),
+    subject: str = Query(min_length=1, max_length=80),
+    page: int = Query(default=1, ge=1),
+    db: Session = Depends(get_db),
+) -> PaginatedPastPapersResponse:
+    filters = (
+        PastPaperDocument.grade_id == grade_id,
+        PastPaperDocument.subject == subject,
+    )
+    total = db.scalar(
+        select(func.count()).select_from(PastPaperDocument).where(*filters)
+    ) or 0
+    documents = db.scalars(
+        select(PastPaperDocument)
+        .where(*filters)
+        .order_by(
+            PastPaperDocument.year.desc(),
+            PastPaperDocument.title,
+            PastPaperDocument.created_at.desc(),
+            PastPaperDocument.id,
+        )
+        .offset((page - 1) * PAST_PAPERS_PAGE_SIZE)
+        .limit(PAST_PAPERS_PAGE_SIZE)
+    ).all()
+    return PaginatedPastPapersResponse(
+        items=[past_paper_response(item) for item in documents],
+        total=total,
+        page=page,
+        page_size=PAST_PAPERS_PAGE_SIZE,
+    )
+
+
+@app.get(
+    "/api/v1/admin/past-papers/page",
+    response_model=PaginatedPastPapersResponse,
+)
+def admin_past_papers_page(
+    page: int = Query(default=1, ge=1),
+    _: AdminAccount = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> PaginatedPastPapersResponse:
+    total = db.scalar(select(func.count()).select_from(PastPaperDocument)) or 0
+    documents = db.scalars(
+        select(PastPaperDocument)
+        .order_by(
+            PastPaperDocument.year.desc(),
+            PastPaperDocument.title,
+            PastPaperDocument.created_at.desc(),
+            PastPaperDocument.id,
+        )
+        .offset((page - 1) * ADMIN_TABLE_PAGE_SIZE)
+        .limit(ADMIN_TABLE_PAGE_SIZE)
+    ).all()
+    return PaginatedPastPapersResponse(
+        items=[past_paper_response(item) for item in documents],
+        total=total,
+        page=page,
+        page_size=ADMIN_TABLE_PAGE_SIZE,
+    )
+
+
+@app.get("/api/v1/past-papers/{document_id}/file")
+def download_past_paper(
+    document_id: UUID,
+    db: Session = Depends(get_db),
+) -> Response:
+    document = db.get(PastPaperDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Past paper not found.")
+    return RedirectResponse(
+        document.cloudinary_url,
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(document.filename)}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.post(
+    "/api/v1/admin/past-papers",
+    response_model=PastPaperResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_past_paper(
+    title: str = Form(min_length=1, max_length=160),
+    grade_id: str = Form(pattern=r"^(pg|pp[12]|grade-[1-9])$"),
+    subject: str = Form(min_length=1, max_length=80),
+    file: UploadFile = File(),
+    _: AdminAccount = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> PastPaperResponse:
+    filename = document_filename(file.filename)
+    extension = PurePosixPath(filename).suffix.lower()
+    content = await file.read(MAX_PAST_PAPER_BYTES + 1)
+    if len(content) > MAX_PAST_PAPER_BYTES:
+        raise HTTPException(status_code=413, detail="Documents must be 20 MB or smaller.")
+    try:
+        content_type = validate_document(filename, content)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    normalized_title = title.strip()
+    normalized_subject = subject.strip()
+    if not normalized_title or not normalized_subject:
+        raise HTTPException(status_code=422, detail="Title and subject cannot be blank.")
+
+    if not cloudinary_is_configured:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Document storage is not configured. Contact the site administrator.",
+        )
+    public_id = f"{settings.cloudinary_folder.strip('/')}/{secrets.token_hex(16)}{extension}"
+    try:
+        cloudinary_result = cloudinary_upload(
+            io.BytesIO(content),
+            resource_type="raw",
+            public_id=public_id,
+            use_filename=False,
+            unique_filename=False,
+            overwrite=False,
+        )
+    except CloudinaryError as error:
+        logger.error("Cloudinary past-paper upload failed: %s", error)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "Cloudinary could not store the document. Check the backend log for the "
+                "provider error, then verify the Cloudinary credentials, account limits, "
+                "and upload permissions."
+            ),
+        ) from error
+    secure_url = cloudinary_result.get("secure_url")
+    stored_public_id = cloudinary_result.get("public_id")
+    if not isinstance(secure_url, str) or not isinstance(stored_public_id, str):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Document storage returned an invalid response.",
+        )
+
+    document = PastPaperDocument(
+        title=normalized_title,
+        grade_id=grade_id,
+        subject=normalized_subject,
+        year=datetime.now(UTC).year,
+        filename=filename[:255],
+        content_type=content_type,
+        cloudinary_public_id=stored_public_id,
+        cloudinary_url=secure_url,
+    )
+    db.add(document)
+    try:
+        db.commit()
+    except SQLAlchemyError as error:
+        db.rollback()
+        try:
+            cloudinary_destroy(stored_public_id, resource_type="raw", invalidate=True)
+        except CloudinaryError as cleanup_error:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    "The document upload failed to save and its Cloudinary cleanup failed. "
+                    "Contact the site administrator."
+                ),
+            ) from cleanup_error
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The document record could not be saved; the uploaded file was removed.",
+        ) from error
+    db.refresh(document)
+    return past_paper_response(document)
+
+
+@app.delete("/api/v1/admin/past-papers/{document_id}", response_model=StatusResponse)
+def delete_past_paper(
+    document_id: UUID,
+    _: AdminAccount = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> StatusResponse:
+    document = db.get(PastPaperDocument, document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Past paper not found.")
+    if document.cloudinary_public_id:
+        try:
+            cloudinary_destroy(document.cloudinary_public_id, resource_type="raw", invalidate=True)
+        except CloudinaryError as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="The document could not be removed from Cloudinary.",
+            ) from error
+    db.delete(document)
+    try:
+        db.commit()
+    except SQLAlchemyError as error:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The document record could not be deleted. Contact the site administrator.",
+        ) from error
+    return StatusResponse(message="Past paper deleted.")
 
 
 @app.post(

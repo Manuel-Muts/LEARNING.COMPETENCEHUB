@@ -39,10 +39,55 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(str(settings.gemini_api_key), "**********")
         self.assertIsNone(self.make_settings().gemini_api_key)
 
+    def test_admin_seed_credentials_are_optional_and_password_is_secret(self) -> None:
+        self.assertIsNone(self.make_settings().admin_email)
+        self.assertIsNone(self.make_settings().admin_password)
+        settings = self.make_settings(
+            admin_email="admin@example.com",
+            admin_password="long-test-password",
+        )
+        self.assertEqual(settings.admin_email, "admin@example.com")
+        self.assertEqual(settings.admin_password.get_secret_value(), "long-test-password")
+        self.assertEqual(str(settings.admin_password), "**********")
+
+    def test_cloudinary_credentials_are_optional_and_secret(self) -> None:
+        settings = self.make_settings(
+            cloudinary_cloud_name="test-cloud",
+            cloudinary_api_key="test-key",
+            cloudinary_api_secret="test-secret",
+        )
+        self.assertEqual(settings.cloudinary_cloud_name, "test-cloud")
+        self.assertEqual(settings.cloudinary_api_key.get_secret_value(), "test-key")
+        self.assertEqual(settings.cloudinary_api_secret.get_secret_value(), "test-secret")
+        self.assertEqual(settings.cloudinary_folder, "competencehub/past-papers")
+
     def test_talksasa_base_url_has_a_secure_default(self) -> None:
         self.assertEqual(
             self.make_settings().talksasa_base_url,
             "https://bulksms.talksasa.com",
+        )
+
+    def test_default_cors_origins_allow_localhost_and_loopback(self) -> None:
+        self.assertEqual(
+            Settings.model_fields["cors_origins"].default,
+            "http://localhost:3000,http://127.0.0.1:3000",
+        )
+        self.assertEqual(
+            self.make_settings(cors_origins="").allowed_origins,
+            ["http://localhost:3000", "http://127.0.0.1:3000"],
+        )
+
+    def test_local_origins_remain_allowed_with_production_cors_override(self) -> None:
+        settings = self.make_settings(
+            cors_origins="https://learning.competencehub.co.ke"
+        )
+        self.assertEqual(
+            settings.allowed_origins,
+            [
+                "https://learning.competencehub.co.ke",
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+            ],
         )
 
 

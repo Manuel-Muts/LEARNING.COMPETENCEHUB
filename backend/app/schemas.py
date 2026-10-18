@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 from typing import Literal
 import re
@@ -25,6 +26,33 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class AdminLoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
+
+
+class AdminResponse(BaseModel):
+    email: EmailStr
+
+
+class PastPaperResponse(BaseModel):
+    id: UUID
+    title: str
+    grade_id: str
+    subject: str
+    year: int
+    filename: str
+    content_type: str
+    created_at: datetime
+
+
+class PaginatedPastPapersResponse(BaseModel):
+    items: list[PastPaperResponse]
+    total: int
+    page: int
+    page_size: int
+
+
 class PhoneRequest(BaseModel):
     phone: str = Field(min_length=9, max_length=24)
 
@@ -40,6 +68,21 @@ class LearnerResponse(BaseModel):
     id: UUID
     display_name: str
     grade_id: str | None
+
+
+class AdminUserResponse(BaseModel):
+    id: UUID
+    phone: str
+    email: str | None
+    created_at: datetime
+    learners: list[LearnerResponse]
+
+
+class PaginatedAdminUsersResponse(BaseModel):
+    items: list[AdminUserResponse]
+    total: int
+    page: int
+    page_size: int
 
 
 class AccountResponse(BaseModel):

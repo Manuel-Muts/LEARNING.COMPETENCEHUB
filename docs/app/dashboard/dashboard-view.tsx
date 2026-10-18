@@ -291,7 +291,7 @@ export default function DashboardPage() {
         aria-label="Learner navigation"
       >
         <div className="sidebar-brand-row">
-          <Link className="brand" href="/" aria-label="CompetenceHub home">
+          <Link className="brand" href="/dashboard" aria-label="CompetenceHub home">
             <span className="brand-mark">c</span>
             <span>
               <strong>competence</strong>

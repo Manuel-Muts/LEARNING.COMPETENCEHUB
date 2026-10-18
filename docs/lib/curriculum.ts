@@ -12,6 +12,19 @@ export type SampleQuestion = {
 
 type GradeBand = Grade["band"];
 
+export const PREDICTIONS_SUBJECT = "Predictions";
+const predictionGradeIds = new Set(["grade-6", "grade-9"]);
+
+export function hasPredictions(gradeId: string): boolean {
+  return predictionGradeIds.has(gradeId);
+}
+
+export function getPastPaperSubjects(grade: Grade): string[] {
+  return hasPredictions(grade.id)
+    ? [...grade.subjects, PREDICTIONS_SUBJECT]
+    : grade.subjects;
+}
+
 const earlyYearsSubjects = [
   "Language",
   "Numberwork",

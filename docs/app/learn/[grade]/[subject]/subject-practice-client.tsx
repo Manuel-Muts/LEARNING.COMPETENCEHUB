@@ -365,19 +365,19 @@ function JuniorPractice({
   return (
     <main className="practice-shell">
       <header className="practice-topbar">
-        <Link href="/" className="practice-brand">
+        <Link href="/dashboard" className="practice-brand">
           <span className="brand-mark">c</span>
           <span><strong>competence</strong><span>HUB</span></span>
         </Link>
         <div className="practice-top-label">JUNIOR PRACTICE · {grade.toUpperCase()}</div>
-        <Link href="/" className="leave-practice">
+        <Link href="/dashboard" className="leave-practice">
           Change subject
         </Link>
       </header>
 
       <div className="practice-layout">
         <section className="practice-main">
-          <Link className="back-link" href="/">
+          <Link className="back-link" href="/dashboard">
             ← <span>{dashboardLabel}</span>
           </Link>
           <div className="practice-heading">
@@ -467,7 +467,7 @@ function JuniorPractice({
                     ? `${remainingToday} generated questions remaining today.`
                     : "Daily limit: up to 10 generated questions per learner. Sign-in required."}
                 </p>
-                <Link href="/" className="back-link">{dashboardLabel}</Link>
+                <Link href="/dashboard" className="back-link">{dashboardLabel}</Link>
               </div>
             ) : (
               <>
@@ -644,21 +644,21 @@ function SamplePractice({
   return (
     <main className="practice-shell">
       <header className="practice-topbar">
-        <Link href="/" className="practice-brand">
+        <Link href="/dashboard" className="practice-brand">
           <span className="brand-mark">c</span>
           <span><strong>competence</strong><span>HUB</span></span>
         </Link>
         <div className="practice-top-label">
           SAMPLE QUESTION · {grade.toUpperCase()}
         </div>
-        <Link href="/" className="leave-practice">
+        <Link href="/dashboard" className="leave-practice">
           Change subject
         </Link>
       </header>
 
       <div className="practice-layout">
         <section className="practice-main">
-          <Link className="back-link" href="/">
+          <Link className="back-link" href="/dashboard">
             ← <span>{dashboardLabel}</span>
           </Link>
           <div className="practice-heading">
@@ -687,7 +687,7 @@ function SamplePractice({
                   paper. Your answer has not been validated or graded. Reviewed
                   exam content and backend grading can be connected later.
                 </p>
-                <Link href="/" className="button button-primary">
+                <Link href="/dashboard" className="button button-primary">
                   {dashboardLabel}
                 </Link>
               </div>
