@@ -99,6 +99,7 @@ function LearningCarousel() {
 
 export default function AuthScreen({ mode }: { mode: AuthMode }) {
   const router = useRouter();
+  const isLogin = mode === "login";
   const isSignup = mode === "signup";
   const isReset = mode === "reset";
   const [showPassword, setShowPassword] = useState(false);
@@ -210,7 +211,22 @@ export default function AuthScreen({ mode }: { mode: AuthMode }) {
   }
 
   return (
-    <main className="auth-page">
+    <main className={`auth-page${isLogin ? " auth-page-login" : ""}`}>
+      {isLogin && (
+        <div className="auth-ticker" role="region" aria-label="Learning encouragement">
+          <div className="auth-ticker-track">
+            <span>
+              Learn something new every day <b aria-hidden="true">✦</b> Keep practicing and
+              grow your confidence <b aria-hidden="true">✦</b> Your next achievement starts
+              with one lesson <b aria-hidden="true">✦</b>&nbsp;
+            </span>
+            <span aria-hidden="true">
+              Learn something new every day <b>✦</b> Keep practicing and grow your confidence
+              <b> ✦</b> Your next achievement starts with one lesson <b>✦</b>&nbsp;
+            </span>
+          </div>
+        </div>
+      )}
       <section className="auth-visual" aria-label="Learning illustration">
         <Link className="auth-brand" href="/" aria-label="CompetenceHub home">
           <Image

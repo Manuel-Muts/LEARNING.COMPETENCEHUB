@@ -667,6 +667,17 @@ button:active:not(:disabled), .button:active:not(:disabled) { transform: scale(.
 .app-shell .dashboard-subject-panel .selection-footnote { font-size: 11px; }
 
 .auth-page { background: #fff; display: grid; grid-template-columns: minmax(380px, .92fr) minmax(480px, 1.08fr); min-height: 100vh; }
+.auth-page-login { padding-top: 38px; position: relative; }
+.auth-page-login .auth-visual, .auth-page-login .auth-form-side { min-height: calc(100vh - 38px); }
+.auth-ticker { align-items: center; background: #f1eefb; border-bottom: 1px solid #e4def5; color: #5e4b9e; display: flex; height: 38px; inset: 0 0 auto; overflow: hidden; position: absolute; z-index: 2; }
+.auth-ticker-track { animation: auth-ticker-scroll 32s linear infinite; display: flex; flex: 0 0 max-content; width: max-content; }
+.auth-ticker-track > span { align-items: center; display: inline-flex; flex: 0 0 auto; font-size: 12px; font-weight: 650; gap: 8px; padding-right: 16px; white-space: nowrap; }
+.auth-ticker-track b { color: #957ed7; font-size: 11px; }
+.auth-ticker:hover .auth-ticker-track { animation-play-state: paused; }
+@keyframes auth-ticker-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (prefers-reduced-motion: reduce) {
+  .auth-ticker-track { animation: none; }
+}
 .auth-visual { background: radial-gradient(ellipse at 75% 27%, rgba(255,255,255,.19), transparent 28%), linear-gradient(145deg, #523da4 0%, #7056c4 49%, #927bd9 100%); color: #fff; display: flex; flex-direction: column; min-height: 100vh; overflow: hidden; padding: 36px clamp(32px, 6vw, 84px); position: relative; }
 .auth-brand, .auth-mobile-brand { align-items: center; display: inline-flex; gap: 9px; position: relative; width: fit-content; z-index: 1; }
 .auth-brand-icon { flex: 0 0 auto; height: 44px; object-fit: contain; width: 44px; }
@@ -831,6 +842,7 @@ button:active:not(:disabled), .button:active:not(:disabled) { transform: scale(.
   .auth-page { display: block; min-height: 100vh; }
   .auth-visual { display: none; }
   .auth-form-side { min-height: 100vh; padding: 32px 23px; }
+  .auth-page-login .auth-form-side { min-height: calc(100vh - 38px); }
   .auth-mobile-brand { display: inline-flex; margin-bottom: 43px; }
   .auth-mobile-brand .auth-brand-name { color: var(--purple); text-shadow: 0 0 8px rgba(110,85,199,.22), 0 0 18px rgba(110,85,199,.14); }
 }
