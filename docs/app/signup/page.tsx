@@ -2,8 +2,12 @@ import type { Metadata } from "next";
 import AuthScreen from "../auth/auth-screen";
 
 export const metadata: Metadata = {
-  title: "Create an account | CompetenceHub",
-  description: "Create a CompetenceHub learner account.",
+  title: "Create a learner account",
+  description: "Create a CompetenceHub account to practise school subjects, explore learning resources, and keep track of your progress.",
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default function SignupPage() {

@@ -23,6 +23,12 @@ Set `NEXT_PUBLIC_API_URL` in the Netlify site's environment variables to the
 deployed API base URL, including `/api/v1`, and configure the backend to allow
 the Netlify site's origin in its production CORS settings.
 
+The site publishes `robots.txt` and `sitemap.xml` for
+`https://learning.competencehub.co.ke`. After deploying, verify the domain in
+Google Search Console and submit `https://learning.competencehub.co.ke/sitemap.xml`.
+Keep the sitemap's site URL in `docs/lib/site.ts` synchronized if the public
+frontend domain changes.
+
 ## Pages
 
 - `/` — sends visitors to the sign-in page, in both local development and production.
