@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     cloudinary_api_key: SecretStr | None = None
     cloudinary_api_secret: SecretStr | None = None
     cloudinary_folder: str = "competencehub/past-papers"
-    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,https://learner.competencehub.co.ke"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     sms_provider: str = "disabled"
     talksasa_api_key: SecretStr | None = None
     talksasa_sender_id: str | None = None

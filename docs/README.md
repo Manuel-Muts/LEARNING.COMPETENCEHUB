@@ -127,6 +127,26 @@ uvicorn app.main:app --reload
 `CORS_ORIGINS` configures additional deployed frontend origins. Restart the API
 after changing its CORS configuration.
 
+### Production deployment on Render
+
+No `ENV=production` setting is required; the API does not use an environment
+mode variable. In the Render backend service, set the required database
+variables from `backend/.env.example`, a unique `AUTH_SECRET_KEY`, and:
+
+- `AUTH_COOKIE_SECURE=true`
+- `AUTH_COOKIE_SAMESITE=none`
+- `AUTH_COOKIE_DOMAIN` unset
+- `CORS_ORIGINS` to the exact HTTPS origin of the deployed frontend, without a
+  trailing slash (for example, `https://learning.competencehub.co.ke`). Include
+  any Netlify URL that users will actually visit, comma-separated.
+
+In the Netlify frontend service, set
+`NEXT_PUBLIC_API_URL=https://learning-competencehub.onrender.com/api/v1` and
+redeploy the frontend. The API origin and frontend origin must match these
+settings for sign-in cookies to work. Set optional integrations such as Gemini,
+SMS, and Cloudinary only if those features are needed. Apply all required
+PostgreSQL migrations before using the service.
+
 From the backend directory, run the unit tests with:
 
 ```powershell

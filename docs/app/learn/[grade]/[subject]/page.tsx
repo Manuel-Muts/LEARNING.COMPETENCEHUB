@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { findGrade, getSampleQuestion, slugifyCurriculumLabel } from "@/lib/curriculum";
+import { getJuniorCompositions } from "@/lib/junior-compositions";
 import { getJuniorQuestions } from "@/lib/junior-question-bank";
 import SubjectPracticeClient from "./subject-practice-client";
 
@@ -22,6 +23,19 @@ export default async function SubjectPracticePage({
     const questions = getJuniorQuestions(grade.id, subject);
     if (!questions) {
       notFound();
+    }
+    const compositions = getJuniorCompositions(grade.id, subject);
+    if (compositions) {
+      return (
+        <SubjectPracticeClient
+          mode="language"
+          gradeId={grade.id}
+          grade={grade.label}
+          subject={subject}
+          questions={questions}
+          compositions={compositions}
+        />
+      );
     }
     return (
       <SubjectPracticeClient

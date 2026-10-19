@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import ButtonSpinner from "@/components/button-spinner";
 import { AuthApiError, authApiRequest } from "@/lib/auth-api";
 import type { SampleQuestion } from "@/lib/curriculum";
+import type { JuniorComposition } from "@/lib/junior-compositions";
 import type { PracticeQuestion } from "@/lib/junior-question-bank";
 import {
   type GeneratedQuestionsResponse,
@@ -24,6 +25,14 @@ type SubjectPracticeClientProps =
       questions: PracticeQuestion[];
     }
   | {
+      mode: "language";
+      gradeId: string;
+      grade: string;
+      subject: string;
+      questions: PracticeQuestion[];
+      compositions: JuniorComposition[];
+    }
+  | {
       mode: "sample";
       grade: string;
       subject: string;
@@ -31,6 +40,18 @@ type SubjectPracticeClientProps =
     };
 
 export default function SubjectPracticeClient(props: SubjectPracticeClientProps) {
+  if (props.mode === "language") {
+    return (
+      <JuniorLanguageLearning
+        gradeId={props.gradeId}
+        grade={props.grade}
+        subject={props.subject}
+        questions={props.questions}
+        compositions={props.compositions}
+      />
+    );
+  }
+
   if (props.mode === "practice") {
     return (
       <JuniorPractice
@@ -51,16 +72,210 @@ export default function SubjectPracticeClient(props: SubjectPracticeClientProps)
   );
 }
 
-function JuniorPractice({
+function JuniorLanguageLearning({
   gradeId,
   grade,
   subject,
   questions,
+  compositions,
 }: {
   gradeId: string;
   grade: string;
   subject: string;
   questions: PracticeQuestion[];
+  compositions: JuniorComposition[];
+}) {
+  const [section, setSection] = useState<"choose" | "revision" | "writing">("choose");
+  const [selectedCompositionIndex, setSelectedCompositionIndex] = useState<number>();
+  const selectedComposition = compositions[selectedCompositionIndex ?? -1];
+
+  if (section === "revision") {
+    return (
+      <JuniorPractice
+        gradeId={gradeId}
+        grade={grade}
+        subject={subject}
+        questions={questions}
+        onReturnToChoices={() => setSection("choose")}
+      />
+    );
+  }
+
+  const isKiswahili = subject === "Kiswahili";
+  const writingLabel = isKiswahili ? "Insha" : "Composition";
+  const compositionWordCount = selectedComposition
+    ? selectedComposition.paragraphs.join(" ").trim().split(/\s+/).length
+    : 0;
+
+  return (
+    <main className="practice-shell">
+      <header className="practice-topbar">
+        <Link href="/dashboard" className="practice-brand">
+          <span className="brand-mark">c</span>
+          <span><strong>competence</strong><span>HUB</span></span>
+        </Link>
+        <div className="practice-top-label">LANGUAGE LEARNING · {grade.toUpperCase()}</div>
+        <Link href="/dashboard" className="leave-practice">Change subject</Link>
+      </header>
+
+      <div className="practice-layout language-learning-layout">
+        <section className="practice-main">
+          <Link className="back-link" href="/dashboard">
+            ← <span>Back to grade and subjects</span>
+          </Link>
+          <div className="practice-heading">
+            <span className="course-subject">{grade.toUpperCase()} · {subject.toUpperCase()}</span>
+            <h1>{section === "writing" ? writingLabel : subject}</h1>
+            <p>
+              {section === "writing"
+                ? `Read these ten ${grade} model ${isKiswahili ? "inshas" : "compositions"} and notice how each one is organised.`
+                : `Choose how you would like to practise ${subject}.`}
+            </p>
+          </div>
+
+          {section === "choose" ? (
+            <div className="language-choice-grid">
+              <button
+                className="language-choice-card"
+                type="button"
+                onClick={() => setSection("revision")}
+              >
+                <span className="language-choice-icon" aria-hidden="true">✓</span>
+                <span className="language-choice-copy">
+                  <strong>Revision questions</strong>
+                  <span>Practise grammar, reading and language skills with questions.</span>
+                </span>
+                <span className="language-choice-arrow" aria-hidden="true">→</span>
+              </button>
+              <button
+                className="language-choice-card"
+                type="button"
+                onClick={() => setSection("writing")}
+              >
+                <span className="language-choice-icon language-writing-icon" aria-hidden="true">✎</span>
+                <span className="language-choice-copy">
+                  <strong>{writingLabel}</strong>
+                  <span>Explore ten extended model topics and examples for {grade}.</span>
+                </span>
+                <span className="language-choice-arrow" aria-hidden="true">→</span>
+              </button>
+            </div>
+          ) : (
+            <>
+              <button
+                className="back-link language-return-link"
+                type="button"
+                onClick={() => {
+                  setSelectedCompositionIndex(undefined);
+                  setSection("choose");
+                }}
+              >
+                ← <span>Back to {subject} options</span>
+              </button>
+              {selectedComposition ? (
+                <article className="composition-reading-card">
+                  <div className="composition-reading-heading">
+                    <span className="question-number">{writingLabel.toUpperCase()} {(selectedCompositionIndex ?? 0) + 1}</span>
+                    <span className="composition-type">{selectedComposition.writingType}</span>
+                    <h2>{selectedComposition.title}</h2>
+                    <p>{selectedComposition.prompt}</p>
+                    <span className="composition-word-count">About {compositionWordCount} words</span>
+                  </div>
+                  {selectedComposition.openingPhrase && (
+                    <blockquote className="composition-opening">
+                      <strong>Opening sentence:</strong> {selectedComposition.openingPhrase}
+                    </blockquote>
+                  )}
+                  <div className="composition-paragraphs">
+                    {selectedComposition.paragraphs.map((paragraph, index) => (
+                      <p key={`${selectedComposition.title}-${index}`}>{paragraph}</p>
+                    ))}
+                  </div>
+                  <p className="composition-study-tip">
+                    {isKiswahili ? (
+                      <>
+                        <strong>Dokezo la kujifunza:</strong> {selectedComposition.writingType?.toLowerCase()} hii ina takribani maneno {compositionWordCount}.
+                        Fuata muundo ulioonyeshwa: hotuba huanza kwa kuwasalimu wasikilizaji na
+                        kumalizika kwa heshima; barua hutumia salamu na hitimisho linalofaa; na
+                        hadithi za kuendeleza huanzia kwenye sentensi uliyopewa. Zingatia mawazo,
+                        matumizi ya alama za uandishi na nyakati za vitenzi, kisha fanya mazoezi
+                        kwa kutumia maneno yako mwenyewe. Ikiwa maelekezo ya mwalimu wako ni tofauti,
+                        yafuate.
+                      </>
+                    ) : (
+                      <>
+                        <strong>Learning tip:</strong> This {selectedComposition.writingType?.toLowerCase()} is about {compositionWordCount} words.
+                        Follow the format shown: speeches greet the audience and close politely,
+                        letters use the right greeting and sign-off, and continuation stories begin
+                        from the given opening. Notice the ideas, punctuation and verb tenses, then
+                        practise in your own words. Follow your teacher&apos;s instructions if they differ.
+                      </>
+                    )}
+                  </p>
+                  <button
+                    className="text-link composition-back-button"
+                    type="button"
+                    onClick={() => setSelectedCompositionIndex(undefined)}
+                  >
+                    ← Choose another topic
+                  </button>
+                </article>
+              ) : (
+                <div className="language-composition-list">
+                  {compositions.map((composition, index) => (
+                    <button
+                      className="language-composition-card"
+                      key={composition.title}
+                      type="button"
+                      onClick={() => setSelectedCompositionIndex(index)}
+                    >
+                      <span className="language-composition-number">{String(index + 1).padStart(2, "0")}</span>
+                      <span className="language-composition-copy">
+                        <strong>{composition.title}</strong>
+                        <span>{composition.prompt}</span>
+                      </span>
+                      <span className="composition-type">{composition.writingType}</span>
+                      <span className="language-choice-arrow" aria-hidden="true">→</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </section>
+        <aside className="practice-sidebar language-learning-sidebar">
+          <div className="session-card">
+            <div className="session-card-heading">
+              <span>WRITING PRACTICE</span>
+              <span className="session-time">{compositions.length} models</span>
+            </div>
+            <h2>Build your writing skills</h2>
+            <p className="language-sidebar-copy">
+              Each grade has ten extended models. Look at the order of ideas, linking
+              words, punctuation and verb tenses, then practise writing your own version.
+            </p>
+            <div className="session-divider" />
+            <p className="language-sidebar-label">FOR YOUR GRADE</p>
+            <strong className="language-sidebar-grade">{grade} · {subject}</strong>
+          </div>
+        </aside>
+      </div>
+    </main>
+  );
+}
+
+function JuniorPractice({
+  gradeId,
+  grade,
+  subject,
+  questions,
+  onReturnToChoices,
+}: {
+  gradeId: string;
+  grade: string;
+  subject: string;
+  questions: PracticeQuestion[];
+  onReturnToChoices?: () => void;
 }) {
   const [questionList, setQuestionList] = useState(questions);
   const [questionKeys, setQuestionKeys] = useState(
@@ -93,6 +308,9 @@ function JuniorPractice({
   const dashboardLabel = "Back to grade and subjects";
   const learnerSelectionRequired = learners.length > 1 && !selectedLearnerId;
   const canSaveProgress = accountStatus === "signed-in" && Boolean(selectedLearnerId);
+  const isLoadingPractice =
+    accountStatus === "loading" ||
+    (accountStatus === "signed-in" && !learnerSelectionRequired && progressStatus === "loading");
   const progress = finished
     ? 100
     : ((questionIndex + (isSubmitted ? 1 : 0)) / questionList.length) * 100;
@@ -370,16 +588,36 @@ function JuniorPractice({
           <span><strong>competence</strong><span>HUB</span></span>
         </Link>
         <div className="practice-top-label">JUNIOR PRACTICE · {grade.toUpperCase()}</div>
-        <Link href="/dashboard" className="leave-practice">
-          Change subject
-        </Link>
+        {onReturnToChoices ? (
+          <button
+            className="leave-practice-button"
+            type="button"
+            onClick={onReturnToChoices}
+          >
+            {subject} options
+          </button>
+        ) : (
+          <Link href="/dashboard" className="leave-practice">
+            Change subject
+          </Link>
+        )}
       </header>
 
       <div className="practice-layout">
         <section className="practice-main">
-          <Link className="back-link" href="/dashboard">
-            ← <span>{dashboardLabel}</span>
-          </Link>
+          {onReturnToChoices ? (
+            <button
+              className="back-link practice-return-button"
+              type="button"
+              onClick={onReturnToChoices}
+            >
+              ← <span>Back to {subject} options</span>
+            </button>
+          ) : (
+            <Link className="back-link" href="/dashboard">
+              ← <span>{dashboardLabel}</span>
+            </Link>
+          )}
           <div className="practice-heading">
             <span className="course-subject">
               {grade.toUpperCase()} · {subject.toUpperCase()} · PRACTICE
@@ -409,8 +647,38 @@ function JuniorPractice({
               <Link href="/login">Sign in</Link> to save progress across visits and generate more questions.
             </p>
           )}
-          {progressStatus === "loading" && accountStatus === "signed-in" && (
-            <p className="practice-account-note" role="status">Loading saved practice progress…</p>
+          {isLoadingPractice && (
+            <div className="progress-loading-panel" role="status" aria-live="polite" aria-busy="true">
+              <div className="progress-loading-art" aria-hidden="true">
+                <span className="progress-loading-orbit progress-loading-orbit-one" />
+                <span className="progress-loading-orbit progress-loading-orbit-two" />
+                <span className="progress-loading-spark">✦</span>
+                <span className="progress-loading-book">▤</span>
+              </div>
+              <div className="progress-loading-copy">
+                <strong>
+                  {accountStatus === "loading"
+                    ? "Getting your learning space ready"
+                    : "Picking up where you left off"}
+                </strong>
+                <span>
+                  {accountStatus === "loading"
+                    ? "Checking your learner profile and saved progress."
+                    : "Your saved answers are on their way. Your questions will be ready in a moment."}
+                </span>
+                <div className="progress-loading-steps" aria-hidden="true">
+                  <span className={accountStatus === "signed-in" ? "progress-loading-step-done" : "progress-loading-step-active"}>
+                    <i>{accountStatus === "signed-in" ? "✓" : "1"}</i> Profile
+                  </span>
+                  <span className={accountStatus === "signed-in" ? "progress-loading-step-active" : ""}>
+                    <i>2</i> Progress
+                  </span>
+                  <span><i>3</i> Ready
+                  </span>
+                </div>
+                <div className="progress-loading-track" aria-hidden="true"><span /></div>
+              </div>
+            </div>
           )}
           {progressError && (
             <p className="generation-error" role="alert">{progressError}</p>
