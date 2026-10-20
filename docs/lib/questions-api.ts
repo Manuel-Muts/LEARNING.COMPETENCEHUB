@@ -25,6 +25,27 @@ export type QuestionProgress = {
   remaining_today: number;
 };
 
+export type SubjectProgressSummary = {
+  grade_id: string;
+  subject: string;
+  total_answered: number;
+  total_correct_answers: number;
+  accuracy_percentage: number;
+  bank_questions_answered: number;
+  bank_completed: boolean;
+  last_activity_at: string;
+};
+
+export type LearnerProgressSummary = {
+  learner_id: string;
+  total_answered: number;
+  total_correct_answers: number;
+  accuracy_percentage: number;
+  subjects_practised: number;
+  last_activity_at: string | null;
+  subjects: SubjectProgressSummary[];
+};
+
 export type GeneratedQuestionsResponse = {
   questions: SavedGeneratedQuestion[];
   remaining_today: number;

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { findGrade, getPastPaperSubjects, grades, slugifyCurriculumLabel } from "@/lib/curriculum";
 import { fetchManagedPastPapers, getPastPapers, type ManagedPastPaper } from "@/lib/past-papers";
+import SubscriptionPreviewNotice from "./subscription-preview-notice";
 
 const selectedGradeStorageKey = "competencehub.grade";
 
@@ -45,6 +46,7 @@ export default function PastPapersSection() {
             : "Choose a grade and subject to browse downloadable past-paper PDFs."}
         </p>
       </div>
+      <SubscriptionPreviewNotice content="past-papers" />
 
       {!showSubjects ? (
         <div className="exam-grade-panel">

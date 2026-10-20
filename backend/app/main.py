@@ -45,8 +45,11 @@ from app.schemas import (
     AdminLoginRequest,
     AdminResponse,
     AdminUserResponse,
+    ChangePasswordRequest,
     GenerateQuestionsRequest,
     GenerateQuestionsResponse,
+    LearnerProgressSummaryResponse,
+    JUNIOR_PRACTICE_SUBJECTS,
     LoginRequest,
     PaginatedAdminUsersResponse,
     PaginatedPastPapersResponse,
@@ -59,6 +62,9 @@ from app.schemas import (
     SavedGeneratedQuestion,
     SignupRequest,
     StatusResponse,
+    SubjectProgressSummary,
+    UPPER_PRIMARY_PRACTICE_SUBJECTS,
+    UpdateLearnerNameRequest,
 )
 from app.security import (
     create_session,
@@ -293,6 +299,19 @@ def get_owned_learner(
             detail="Learner profile not found.",
         )
     return learner
+
+
+def ensure_practice_grade_subject(grade_id: str, subject: str) -> None:
+    subjects = (
+        UPPER_PRIMARY_PRACTICE_SUBJECTS
+        if grade_id in {"grade-4", "grade-5", "grade-6"}
+        else JUNIOR_PRACTICE_SUBJECTS
+    )
+    if subject not in subjects:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Subject is not available for this grade.",
+        )
 
 
 def saved_generated_question(
@@ -738,18 +757,19 @@ def generate_practice_questions(
     response_model=QuestionProgressResponse,
 )
 def get_question_progress(
-    grade_id: str = Query(pattern=r"^grade-[789]$"),
+    grade_id: str = Query(pattern=r"^grade-[4-9]$"),
     subject: str = Query(
         pattern=(
-            r"^(Mathematics|English|Kiswahili|Integrated Science|Agriculture|"
-            r"Christian Religious Education|Pre-Technical Studies|"
-            r"Creative Arts and Sports|Social Studies)$"
+            r"^(Mathematics|English|Kiswahili|Science and Technology|"
+            r"Integrated Science|Agriculture|Christian Religious Education|"
+            r"Pre-Technical Studies|Creative Arts and Sports|Social Studies)$"
         )
     ),
     learner_id: UUID = Query(),
     account: GuardianAccount = Depends(require_account),
     db: Session = Depends(get_db),
 ) -> QuestionProgressResponse:
+    ensure_practice_grade_subject(grade_id, subject)
     learner = get_owned_learner(db, account, learner_id)
     attempts = db.execute(
         select(LearnerQuestionAttempt.question_key, LearnerQuestionAttempt.is_correct)
@@ -817,6 +837,102 @@ def get_question_progress(
     )
 
 
+@app.get(
+    "/api/v1/questions/summary",
+    response_model=LearnerProgressSummaryResponse,
+)
+def get_learner_progress_summary(
+    learner_id: UUID = Query(),
+    account: GuardianAccount = Depends(require_account),
+    db: Session = Depends(get_db),
+) -> LearnerProgressSummaryResponse:
+    learner = get_owned_learner(db, account, learner_id)
+    ranked_attempts = (
+        select(
+            LearnerQuestionAttempt.grade_id.label("grade_id"),
+            LearnerQuestionAttempt.subject.label("subject"),
+            LearnerQuestionAttempt.question_key.label("question_key"),
+            LearnerQuestionAttempt.is_correct.label("is_correct"),
+            LearnerQuestionAttempt.created_at.label("created_at"),
+            func.row_number()
+            .over(
+                partition_by=(
+                    LearnerQuestionAttempt.grade_id,
+                    LearnerQuestionAttempt.subject,
+                    LearnerQuestionAttempt.question_key,
+                ),
+                order_by=(
+                    LearnerQuestionAttempt.created_at.desc(),
+                    LearnerQuestionAttempt.id.desc(),
+                ),
+            )
+            .label("attempt_rank"),
+        )
+        .where(LearnerQuestionAttempt.learner_profile_id == learner.id)
+        .subquery()
+    )
+    latest_attempts = db.execute(
+        select(
+            ranked_attempts.c.grade_id,
+            ranked_attempts.c.subject,
+            ranked_attempts.c.question_key,
+            ranked_attempts.c.is_correct,
+            ranked_attempts.c.created_at,
+        )
+        .where(ranked_attempts.c.attempt_rank == 1)
+        .order_by(ranked_attempts.c.created_at.desc())
+    ).all()
+
+    grouped: dict[tuple[str, str], list[tuple[str, bool, datetime]]] = {}
+    for grade_id, subject, question_key, is_correct, created_at in latest_attempts:
+        grouped.setdefault((grade_id, subject), []).append(
+            (question_key, is_correct, created_at)
+        )
+
+    subject_summaries = []
+    for (grade_id, subject), attempts in grouped.items():
+        correct_answers = sum(is_correct for _, is_correct, _ in attempts)
+        bank_questions_answered = sum(
+            re.fullmatch(r"bank-[0-9]", question_key) is not None
+            for question_key, _, _ in attempts
+        )
+        subject_summaries.append(
+            SubjectProgressSummary(
+                grade_id=grade_id,
+                subject=subject,
+                total_answered=len(attempts),
+                total_correct_answers=correct_answers,
+                accuracy_percentage=round(correct_answers / len(attempts) * 100),
+                bank_questions_answered=bank_questions_answered,
+                bank_completed=bank_questions_answered == 10,
+                last_activity_at=max(created_at for _, _, created_at in attempts),
+            )
+        )
+    subject_summaries.sort(key=lambda item: item.last_activity_at, reverse=True)
+
+    total_answered = sum(item.total_answered for item in subject_summaries)
+    total_correct_answers = sum(
+        item.total_correct_answers for item in subject_summaries
+    )
+    return LearnerProgressSummaryResponse(
+        learner_id=learner.id,
+        total_answered=total_answered,
+        total_correct_answers=total_correct_answers,
+        accuracy_percentage=(
+            round(total_correct_answers / total_answered * 100)
+            if total_answered
+            else 0
+        ),
+        subjects_practised=len(subject_summaries),
+        last_activity_at=(
+            max(item.last_activity_at for item in subject_summaries)
+            if subject_summaries
+            else None
+        ),
+        subjects=subject_summaries,
+    )
+
+
 @app.post(
     "/api/v1/questions/attempt",
     response_model=QuestionAttemptResponse,
@@ -827,6 +943,7 @@ def record_question_attempt(
     account: GuardianAccount = Depends(require_account),
     db: Session = Depends(get_db),
 ) -> QuestionAttemptResponse:
+    ensure_practice_grade_subject(payload.grade_id, payload.subject)
     learner = get_owned_learner(db, account, payload.learner_id)
     if payload.source == "bank":
         if re.fullmatch(r"bank-[0-9]", payload.question_key) is None:
@@ -937,6 +1054,50 @@ def login(
 @app.get("/api/v1/auth/me", response_model=AccountResponse)
 def me(account: GuardianAccount = Depends(require_account)) -> AccountResponse:
     return account_response(account)
+
+
+@app.patch("/api/v1/auth/learners/{learner_id}", response_model=AccountResponse)
+def update_learner_name(
+    learner_id: UUID,
+    payload: UpdateLearnerNameRequest,
+    account: GuardianAccount = Depends(require_account),
+    db: Session = Depends(get_db),
+) -> AccountResponse:
+    learner = get_owned_learner(db, account, learner_id)
+    learner.display_name = payload.display_name
+    db.commit()
+    return account_response(account)
+
+
+@app.post("/api/v1/auth/change-password", response_model=StatusResponse)
+def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    account: GuardianAccount = Depends(require_account),
+    db: Session = Depends(get_db),
+) -> StatusResponse:
+    if not verify_password(payload.current_password, account.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The current password is incorrect.",
+        )
+
+    current_token = get_request_token(request)
+    if current_token is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Sign in required.")
+
+    account.password_hash = hash_password(payload.new_password)
+    db.execute(
+        update(AuthSession)
+        .where(
+            AuthSession.guardian_account_id == account.id,
+            AuthSession.revoked_at.is_(None),
+            AuthSession.token_hash != hash_session_token(current_token),
+        )
+        .values(revoked_at=datetime.now(UTC))
+    )
+    db.commit()
+    return StatusResponse(message="Password updated.")
 
 
 @app.post("/api/v1/auth/logout", response_model=StatusResponse)

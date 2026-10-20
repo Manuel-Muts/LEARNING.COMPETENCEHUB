@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     auth_secret_key: SecretStr
     auth_session_cookie: str = "competencehub_session"
     auth_session_ttl_hours: int = 24
-    auth_cookie_secure: bool = False
-    auth_cookie_samesite: str = "lax"
+    auth_cookie_secure: bool = True
+    auth_cookie_samesite: str = "none"
     auth_cookie_domain: str | None = None
     admin_email: str | None = None
     admin_password: SecretStr | None = None

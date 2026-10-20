@@ -5,6 +5,32 @@ import re
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, ValidationInfo, field_validator
 
+UPPER_PRIMARY_PRACTICE_SUBJECTS = frozenset(
+    {
+        "Mathematics",
+        "English",
+        "Kiswahili",
+        "Science and Technology",
+        "Integrated Science",
+        "Social Studies",
+        "Christian Religious Education",
+        "Creative Arts and Sports",
+    }
+)
+JUNIOR_PRACTICE_SUBJECTS = frozenset(
+    {
+        "Mathematics",
+        "English",
+        "Kiswahili",
+        "Integrated Science",
+        "Agriculture",
+        "Christian Religious Education",
+        "Pre-Technical Studies",
+        "Creative Arts and Sports",
+        "Social Studies",
+    }
+)
+
 
 class SignupRequest(BaseModel):
     learner_name: str = Field(min_length=1, max_length=120)
@@ -62,6 +88,11 @@ class PasswordResetRequest(PhoneRequest):
     new_password: str = Field(min_length=8, max_length=128)
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class LearnerResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -90,6 +121,18 @@ class AccountResponse(BaseModel):
     phone: str
     email: str | None
     learners: list[LearnerResponse]
+
+
+class UpdateLearnerNameRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("display_name")
+    @classmethod
+    def display_name_must_not_be_blank(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Learner name cannot be blank.")
+        return normalized
 
 
 class StatusResponse(BaseModel):
@@ -134,22 +177,38 @@ class GenerateQuestionsResponse(BaseModel):
 
 class RecordQuestionAttemptRequest(BaseModel):
     learner_id: UUID
-    grade_id: str = Field(pattern=r"^grade-[789]$")
+    grade_id: str = Field(pattern=r"^grade-[4-9]$")
     subject: str = Field(
         pattern=(
-            r"^(Mathematics|English|Kiswahili|Integrated Science|Agriculture|"
-            r"Christian Religious Education|Pre-Technical Studies|"
-            r"Creative Arts and Sports|Social Studies)$"
+            r"^(Mathematics|English|Kiswahili|Science and Technology|"
+            r"Integrated Science|Agriculture|Christian Religious Education|"
+            r"Pre-Technical Studies|Creative Arts and Sports|Social Studies)$"
         )
     )
     source: Literal["bank", "generated"]
     question_key: str = Field(min_length=6, max_length=64)
     is_correct: bool
 
+    @field_validator("subject")
+    @classmethod
+    def subject_must_be_available_for_grade(cls, value: str, info: ValidationInfo) -> str:
+        grade_id = info.data.get("grade_id")
+        subjects = (
+            UPPER_PRIMARY_PRACTICE_SUBJECTS
+            if grade_id in {"grade-4", "grade-5", "grade-6"}
+            else JUNIOR_PRACTICE_SUBJECTS
+        )
+        if value not in subjects:
+            raise ValueError("Subject is not available for this grade.")
+        return value
+
     @field_validator("question_key")
     @classmethod
     def question_key_must_match_source(cls, value: str, info: ValidationInfo) -> str:
         source = info.data.get("source")
+        grade_id = info.data.get("grade_id")
+        if source == "generated" and grade_id in {"grade-4", "grade-5", "grade-6"}:
+            raise ValueError("Generated questions are only available for Junior School.")
         if source == "bank" and re.fullmatch(r"bank-[0-9]", value) is None:
             raise ValueError("Bank question identifier is invalid.")
         if source == "generated" and not value.startswith("generated:"):
@@ -172,3 +231,24 @@ class QuestionProgressResponse(BaseModel):
     total_answered: int
     pending_generated_questions: list[SavedGeneratedQuestion]
     remaining_today: int = Field(ge=0, le=10)
+
+
+class SubjectProgressSummary(BaseModel):
+    grade_id: str
+    subject: str
+    total_answered: int
+    total_correct_answers: int
+    accuracy_percentage: int
+    bank_questions_answered: int
+    bank_completed: bool
+    last_activity_at: datetime
+
+
+class LearnerProgressSummaryResponse(BaseModel):
+    learner_id: UUID
+    total_answered: int
+    total_correct_answers: int
+    accuracy_percentage: int
+    subjects_practised: int
+    last_activity_at: datetime | None
+    subjects: list[SubjectProgressSummary]

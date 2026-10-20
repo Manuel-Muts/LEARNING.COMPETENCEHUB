@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { findGrade, grades, slugifyCurriculumLabel } from "@/lib/curriculum";
+import SubscriptionPreviewNotice from "./subscription-preview-notice";
 
 type SelectionStep = 1 | 2 | "selected";
 
@@ -88,6 +89,7 @@ export default function LearningSelector() {
           </span>
         )}
       </div>
+      <SubscriptionPreviewNotice content="learning" />
 
       {step === 1 && (
         <div className="grade-section dashboard-grade-section">

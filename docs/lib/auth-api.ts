@@ -41,7 +41,7 @@ const AUTH_API_URL = (
 
 export async function authApiRequest<T extends object = AuthApiResponse>(
   path: string,
-  options: { method?: "GET" | "POST"; body?: unknown } = {},
+  options: { method?: "GET" | "POST" | "PATCH"; body?: unknown } = {},
 ): Promise<T> {
   const response = await fetch(`${AUTH_API_URL}/auth/${path}`, {
     method: options.method ?? "GET",

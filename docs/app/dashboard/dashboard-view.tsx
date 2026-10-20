@@ -2,21 +2,27 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import ButtonSpinner from "@/components/button-spinner";
 import {
   AuthApiError,
+  type AuthenticatedAccount,
   authApiRequest,
   clearCachedAccount,
   getCachedAccount,
   setCachedAccount,
 } from "@/lib/auth-api";
 import { findGrade, grades, slugifyCurriculumLabel } from "@/lib/curriculum";
+import {
+  type LearnerProgressSummary,
+  questionApiRequest,
+} from "@/lib/questions-api";
 import PastPapersSection from "./past-papers-section";
 import LearningSelector from "./learning-selector";
 
-type DashboardSection = "overview" | "learning" | "exams" | "progress" | "planner";
-type DashboardPanel = "search" | "notifications" | null;
+type DashboardSection = "overview" | "learning" | "exams" | "progress" | "planner" | "billing";
+type DashboardPanel = "search" | "notifications" | "profile" | null;
+type AccountDialogMode = "profile" | "password";
 type PlanDay = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
 const planDays: PlanDay[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -24,7 +30,7 @@ function Icon({
   name,
   size = 20,
 }: {
-  name: "home" | "book" | "exam" | "chart" | "calendar" | "search" | "bell" | "arrow";
+  name: "home" | "book" | "exam" | "chart" | "calendar" | "receipt" | "search" | "bell" | "arrow" | "profile";
   size?: number;
 }) {
   const paths = {
@@ -58,6 +64,12 @@ function Icon({
         <path d="M16 3v4M8 3v4M3 11h18" />
       </>
     ),
+    receipt: (
+      <>
+        <path d="M4 3v18l3-2 3 2 3-2 3 2 4-2V3l-4 2-3-2-3 2-3-2z" />
+        <path d="M8 9h8M8 13h8" />
+      </>
+    ),
     search: (
       <>
         <circle cx="11" cy="11" r="7" />
@@ -71,6 +83,12 @@ function Icon({
       </>
     ),
     arrow: <path d="M5 12h14m-7-7 7 7-7 7" />,
+    profile: (
+      <>
+        <circle cx="12" cy="8" r="3.5" />
+        <path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5" />
+      </>
+    ),
   };
 
   return (
@@ -90,6 +108,16 @@ function Icon({
   );
 }
 
+function getSavedLearnerId(account: AuthenticatedAccount): string {
+  const savedLearnerId = window.localStorage.getItem(
+    `competencehub.learner.${account.id}`,
+  );
+  if (account.learners.some((learner) => learner.id === savedLearnerId)) {
+    return savedLearnerId ?? "";
+  }
+  return account.learners.length === 1 ? account.learners[0].id : "";
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [section, setSection] = useState<DashboardSection>("overview");
@@ -100,6 +128,10 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [learnerName, setLearnerName] = useState("");
+  const [account, setAccount] = useState<AuthenticatedAccount>();
+  const [progressLearnerId, setProgressLearnerId] = useState("");
+  const [accountDialog, setAccountDialog] = useState<AccountDialogMode>();
+  const closeAccountDialog = useCallback(() => setAccountDialog(undefined), []);
   const [accountStatus, setAccountStatus] = useState<"loading" | "signed-in" | "signed-out" | "unavailable">("loading");
   const [accountMessage, setAccountMessage] = useState("");
   const [accountCreated, setAccountCreated] = useState(false);
@@ -125,7 +157,9 @@ export default function DashboardPage() {
     async function loadAccount() {
       const cachedAccount = getCachedAccount();
       if (cachedAccount) {
+        setAccount(cachedAccount);
         setLearnerName(cachedAccount.learners[0]?.display_name?.trim() ?? "");
+        setProgressLearnerId(getSavedLearnerId(cachedAccount));
         setAccountStatus("signed-in");
         return;
       }
@@ -143,7 +177,9 @@ export default function DashboardPage() {
         }>("me");
         if (!cancelled) {
           setCachedAccount(account);
+          setAccount(account);
           setLearnerName(account.learners[0]?.display_name?.trim() ?? "");
+          setProgressLearnerId(getSavedLearnerId(account));
           setAccountStatus("signed-in");
         }
       } catch (error) {
@@ -170,6 +206,7 @@ export default function DashboardPage() {
     try {
       await authApiRequest("logout", { method: "POST" });
       clearCachedAccount();
+      setAccount(undefined);
       setLearnerName("");
       setAccountStatus("signed-out");
       router.replace("/login");
@@ -181,16 +218,7 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
-    const savedSection = window.localStorage.getItem("competencehub.dashboardSection");
-    if (
-      savedSection === "overview" ||
-      savedSection === "learning" ||
-      savedSection === "exams" ||
-      savedSection === "progress" ||
-      savedSection === "planner"
-    ) {
-      setSection(savedSection);
-    }
+    window.localStorage.setItem("competencehub.dashboardSection", "overview");
 
     function readSelection() {
       setGradeId(window.localStorage.getItem("competencehub.grade") ?? "");
@@ -214,12 +242,20 @@ export default function DashboardPage() {
     setMobileNavOpen(false);
   }
 
+  function handleProgressLearnerChange(learnerId: string) {
+    setProgressLearnerId(learnerId);
+    if (account) {
+      window.localStorage.setItem(`competencehub.learner.${account.id}`, learnerId);
+    }
+  }
+
   const sectionTitles: Record<DashboardSection, string> = {
     overview: "Overview",
     learning: "My learning",
     exams: "Past Papers",
     progress: "My progress",
     planner: "Study planner",
+    billing: "Billing & usage",
   };
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
   const searchableSections = (Object.entries(sectionTitles) as [DashboardSection, string][])
@@ -330,6 +366,7 @@ export default function DashboardPage() {
           >
             <Icon name="book" />
             <span>My learning</span>
+            <span className="nav-access-preview" aria-label="Subscription required">🔒</span>
             {subject && (
               <span className="nav-count" title="Selected subject">
                 1
@@ -344,6 +381,7 @@ export default function DashboardPage() {
           >
             <Icon name="exam" />
             <span>Past Papers</span>
+            <span className="nav-access-preview" aria-label="Subscription required">🔒</span>
           </button>
           <button
             className={`nav-link ${section === "progress" ? "active" : ""}`}
@@ -363,6 +401,15 @@ export default function DashboardPage() {
             <Icon name="calendar" />
             <span>Study planner</span>
           </button>
+          <button
+            className={`nav-link ${section === "billing" ? "active" : ""}`}
+            type="button"
+            onClick={() => openSection("billing")}
+            aria-current={section === "billing" ? "page" : undefined}
+          >
+            <Icon name="receipt" />
+            <span>Billing &amp; usage</span>
+          </button>
         </nav>
 
         <div className="sidebar-bottom">
@@ -375,30 +422,6 @@ export default function DashboardPage() {
               <p>{subject ? `${grade?.label} · ${subject}` : "Choose your grade and subject to begin."}</p>
             </div>
           </div>
-          {accountStatus === "signed-in" ? (
-            <div className="profile-account">
-              <div className="profile-account-details">
-                <span className="avatar">{learnerName.charAt(0).toUpperCase() || "L"}</span>
-                <span className="profile-copy">
-                  <strong>{learnerName || "Learner"}</strong>
-                  <span>Learner account</span>
-                </span>
-              </div>
-              <button
-                aria-busy={isLoggingOut}
-                className="profile-logout-button"
-                disabled={isLoggingOut}
-                onClick={() => void handleLogout()}
-                type="button"
-              >
-                {isLoggingOut && <ButtonSpinner />}
-                {isLoggingOut ? "Signing out…" : "Log out"}
-              </button>
-            </div>
-          ) : null}
-          {accountMessage && accountStatus === "signed-in" && (
-            <p className="profile-error-message" role="alert">{accountMessage}</p>
-          )}
         </div>
       </aside>
 
@@ -446,9 +469,16 @@ export default function DashboardPage() {
               <Icon name="bell" />
             </button>
             <span className="topbar-divider" />
-            <span className="avatar avatar-small">
-              {learnerName.charAt(0).toUpperCase() || "L"}
-            </span>
+            <button
+              className="avatar avatar-small profile-menu-trigger"
+              type="button"
+              aria-label="Open account menu"
+              aria-expanded={activePanel === "profile"}
+              aria-controls="dashboard-profile-panel"
+              onClick={() => setActivePanel(activePanel === "profile" ? null : "profile")}
+            >
+              <Icon name="profile" size={18} />
+            </button>
           </div>
           {activePanel === "search" && (
             <section
@@ -557,7 +587,70 @@ export default function DashboardPage() {
               </div>
             </section>
           )}
+          {activePanel === "profile" && (
+            <section
+              className="topbar-panel dashboard-profile-panel"
+              id="dashboard-profile-panel"
+              aria-label="Account menu"
+            >
+              <div className="profile-menu-heading">
+                <span className="avatar"><Icon name="profile" size={20} /></span>
+                <span className="profile-copy">
+                  <strong>{learnerName || "Learner"}</strong>
+                  <span>{account?.phone ?? "Learner account"}</span>
+                </span>
+                <button
+                  className="panel-close-button"
+                  type="button"
+                  aria-label="Close account menu"
+                  onClick={() => setActivePanel(null)}
+                >
+                  ×
+                </button>
+              </div>
+              {accountMessage && <p className="profile-error-message" role="alert">{accountMessage}</p>}
+              {accountStatus === "signed-in" ? (
+                <div className="profile-menu-actions">
+                  <button type="button" onClick={() => { setAccountDialog("profile"); setActivePanel(null); }}>
+                    Profile
+                  </button>
+                  <button type="button" onClick={() => { setAccountDialog("password"); setActivePanel(null); }}>
+                    Change password
+                  </button>
+                  <button
+                    className="profile-menu-logout"
+                    type="button"
+                    disabled={isLoggingOut}
+                    aria-busy={isLoggingOut}
+                    onClick={() => void handleLogout()}
+                  >
+                    {isLoggingOut && <ButtonSpinner />}
+                    {isLoggingOut ? "Signing out…" : "Log out"}
+                  </button>
+                </div>
+              ) : accountStatus === "signed-out" ? (
+                <Link className="profile-sign-in-link" href="/login">Sign in</Link>
+              ) : (
+                <p className="profile-menu-note">
+                  {accountStatus === "loading" ? "Loading your account…" : "Your account details are unavailable."}
+                </p>
+              )}
+            </section>
+          )}
         </header>
+
+        {accountDialog && account && (
+          <AccountDialog
+            account={account}
+            mode={accountDialog}
+            onClose={closeAccountDialog}
+            onAccountUpdated={(updatedAccount) => {
+              setCachedAccount(updatedAccount);
+              setAccount(updatedAccount);
+              setLearnerName(updatedAccount.learners[0]?.display_name?.trim() ?? "");
+            }}
+          />
+        )}
 
         <div className="dashboard-content">
           {accountCreated && (
@@ -648,14 +741,16 @@ export default function DashboardPage() {
 
           {section === "learning" && <LearningSelector />}
           {section === "exams" && <PastPapersSection />}
-          {section === "progress" && (
+          <div hidden={section !== "progress"}>
             <ProgressSection
-              gradeLabel={grade?.label}
-              subject={subject}
-              subjectHref={grade && subject ? `/learn/${grade.id}/${subjectId}` : undefined}
+              isActive={section === "progress"}
+              accountStatus={accountStatus}
+              learners={account?.learners ?? []}
+              learnerId={progressLearnerId}
+              onLearnerChange={handleProgressLearnerChange}
               onChooseLearning={() => openSection("learning")}
             />
-          )}
+          </div>
           {section === "planner" && (
             <PlannerSection
               gradeLabel={grade?.label}
@@ -663,6 +758,7 @@ export default function DashboardPage() {
               onChooseLearning={() => openSection("learning")}
             />
           )}
+          {section === "billing" && <BillingSection />}
           <footer className="dashboard-footer">
             <span>Dashboard preview · Learning activity will appear here as it is recorded.</span>
             <span>MADE FOR YOUR NEXT STEP</span>
@@ -674,50 +770,198 @@ export default function DashboardPage() {
 }
 
 function ProgressSection({
-  gradeLabel,
-  subject,
-  subjectHref,
+  isActive,
+  accountStatus,
+  learners,
+  learnerId,
+  onLearnerChange,
   onChooseLearning,
 }: {
-  gradeLabel?: string;
-  subject?: string;
-  subjectHref?: string;
+  isActive: boolean;
+  accountStatus: "loading" | "signed-in" | "signed-out" | "unavailable";
+  learners: AuthenticatedAccount["learners"];
+  learnerId: string;
+  onLearnerChange: (learnerId: string) => void;
   onChooseLearning: () => void;
 }) {
+  const [summary, setSummary] = useState<LearnerProgressSummary>();
+  const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "unavailable">("idle");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!isActive) return;
+
+    if (accountStatus !== "signed-in" || !learnerId) {
+      setSummary(undefined);
+      setStatus("idle");
+      setError("");
+      return;
+    }
+    if (summary?.learner_id === learnerId && status === "loaded") return;
+
+    let cancelled = false;
+    async function loadSummary() {
+      setStatus("loading");
+      setError("");
+      try {
+        const result = await questionApiRequest<LearnerProgressSummary>(
+          `summary?${new URLSearchParams({ learner_id: learnerId }).toString()}`,
+        );
+        if (!cancelled) {
+          setSummary(result);
+          setStatus("loaded");
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setSummary(undefined);
+          setError(loadError instanceof Error ? loadError.message : "Could not load saved progress.");
+          setStatus("unavailable");
+        }
+      }
+    }
+
+    void loadSummary();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountStatus, isActive, learnerId, status, summary]);
+
+  const selectedLearner = learners.find((learner) => learner.id === learnerId);
+
   return (
     <section className="dashboard-tab-content">
       <div className="dashboard-tab-heading">
         <span className="eyebrow">YOUR LEARNING RECORD</span>
         <h1>My progress</h1>
-        <p>Completed lessons and assessment results will be shown here.</p>
+        <p>Saved revision-question results across your subjects.</p>
       </div>
-      <div className="data-status-card">
-        <span className="data-status-icon" aria-hidden="true">↗</span>
-        <div>
-          <span className="overview-card-kicker">NO GRADED ACTIVITY YET</span>
-          <h2>Your progress will grow as you learn</h2>
-          <p>
-            Progress is not recorded in this frontend preview. Once accounts and
-            backend grading are connected, this section can show completed lessons,
-            scores, and learning trends.
-          </p>
-          {(gradeLabel || subject) && (
-            <div className="progress-current-selection">
-              Current selection: <strong>{gradeLabel ?? "Grade not selected"}</strong>
-              {subject ? ` · ${subject}` : ""}
+      {learners.length > 1 && (
+        <label className="progress-learner-select">
+          Progress for
+          <select value={learnerId} onChange={(event) => onLearnerChange(event.target.value)}>
+            <option value="">Choose a learner</option>
+            {learners.map((learner) => (
+              <option key={learner.id} value={learner.id}>{learner.display_name}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      {accountStatus === "loading" && (
+        <div className="data-status-card" role="status">Loading your account…</div>
+      )}
+      {accountStatus === "signed-out" && (
+        <div className="data-status-card">
+          <span className="data-status-icon" aria-hidden="true">↗</span>
+          <div>
+            <span className="overview-card-kicker">SIGN IN TO VIEW PROGRESS</span>
+            <h2>Your saved practice belongs to your account</h2>
+            <p>Sign in to see revision answers saved across visits.</p>
+            <Link className="button button-primary" href="/login">Sign in</Link>
+          </div>
+        </div>
+      )}
+      {accountStatus === "unavailable" && (
+        <p className="account-dialog-error" role="alert">
+          Your account details could not be loaded. Please refresh and try again.
+        </p>
+      )}
+      {accountStatus === "signed-in" && learners.length === 0 && (
+        <div className="data-status-card" role="status">
+          No learner profile is linked to this account yet.
+        </div>
+      )}
+      {accountStatus === "signed-in" && selectedLearner && (
+        <div className="progress-learner-heading">
+          <span>Showing progress for</span>
+          <strong>{selectedLearner.display_name}</strong>
+        </div>
+      )}
+      {accountStatus === "signed-in" && !learnerId && learners.length > 1 && (
+        <div className="data-status-card" role="status">
+          Choose a learner above to view their saved practice results.
+        </div>
+      )}
+      {accountStatus === "signed-in" && learnerId && status === "loading" && (
+        <div className="data-status-card" role="status" aria-busy="true">
+          Loading saved practice progress…
+        </div>
+      )}
+      {accountStatus === "signed-in" && learnerId && status === "unavailable" && (
+        <div className="data-status-card">
+          <div>
+            <span className="overview-card-kicker">PROGRESS UNAVAILABLE</span>
+            <h2>We couldn’t load saved activity</h2>
+            <p className="account-dialog-error" role="alert">{error}</p>
+          </div>
+        </div>
+      )}
+      {accountStatus === "signed-in" && summary && status === "loaded" && (
+        <>
+          <div className="progress-summary-grid">
+            <article className="progress-summary-card">
+              <span>QUESTIONS ANSWERED</span>
+              <strong>{summary.total_answered}</strong>
+            </article>
+            <article className="progress-summary-card">
+              <span>ANSWERED CORRECTLY</span>
+              <strong>{summary.total_correct_answers}</strong>
+            </article>
+            <article className="progress-summary-card">
+              <span>OVERALL ACCURACY</span>
+              <strong>{summary.accuracy_percentage}%</strong>
+            </article>
+            <article className="progress-summary-card">
+              <span>SUBJECTS PRACTISED</span>
+              <strong>{summary.subjects_practised}</strong>
+            </article>
+          </div>
+          {summary.subjects.length > 0 ? (
+            <div className="progress-subject-list">
+              <h2>Progress by subject</h2>
+              {summary.subjects.map((item) => {
+                const subjectGrade = findGrade(item.grade_id);
+                const progressHref = `/learn/${item.grade_id}/${slugifyCurriculumLabel(item.subject)}`;
+                return (
+                  <article className="progress-subject-card" key={`${item.grade_id}-${item.subject}`}>
+                    <div className="progress-subject-heading">
+                      <div>
+                        <span>{subjectGrade?.label ?? item.grade_id}</span>
+                        <h3>{item.subject}</h3>
+                      </div>
+                      <strong>{item.accuracy_percentage}% accuracy</strong>
+                    </div>
+                    <p>
+                      {item.total_answered} {item.total_answered === 1 ? "question" : "questions"} answered ·{" "}
+                      {item.total_correct_answers} correct
+                    </p>
+                    <div className="progress-subject-bank">
+                      <span>{item.bank_questions_answered} of 10 core questions completed</span>
+                      <div className="progress-track" aria-label={`${item.bank_questions_answered} of 10 core questions completed`}>
+                        <span style={{ width: `${Math.min(item.bank_questions_answered * 10, 100)}%` }} />
+                      </div>
+                    </div>
+                    <Link className="progress-subject-link" href={progressHref}>
+                      Continue practising <span aria-hidden="true">→</span>
+                    </Link>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="data-status-card progress-empty-state">
+              <span className="data-status-icon" aria-hidden="true">↗</span>
+              <div>
+                <span className="overview-card-kicker">NO SAVED PRACTICE YET</span>
+                <h2>Your progress will grow as you practise</h2>
+                <p>Complete revision questions while signed in to see your results here.</p>
+                <button className="button button-primary" type="button" onClick={onChooseLearning}>
+                  Choose a grade and subject <span aria-hidden="true">→</span>
+                </button>
+              </div>
             </div>
           )}
-          {subjectHref ? (
-            <Link className="button button-primary" href={subjectHref}>
-              Continue learning <span aria-hidden="true">→</span>
-            </Link>
-          ) : (
-            <button className="button button-primary" type="button" onClick={onChooseLearning}>
-              Choose a grade and subject <span aria-hidden="true">→</span>
-            </button>
-          )}
-        </div>
-      </div>
+        </>
+      )}
     </section>
   );
 }
@@ -740,12 +984,12 @@ function PlannerSection({
     if (savedDays) {
       try {
         const parsed: unknown = JSON.parse(savedDays);
-      const allowedDays: readonly string[] = planDays;
-      if (
-        Array.isArray(parsed) &&
-        parsed.every((day): day is PlanDay => typeof day === "string" && allowedDays.includes(day))
-      ) {
-        setSelectedDays(parsed);
+        const allowedDays: readonly string[] = planDays;
+        if (
+          Array.isArray(parsed) &&
+          parsed.every((day): day is PlanDay => typeof day === "string" && allowedDays.includes(day))
+        ) {
+          setSelectedDays(parsed);
         }
       } catch {
         window.localStorage.removeItem("competencehub.plannedDays");
@@ -822,5 +1066,284 @@ function PlannerSection({
         <span>When progress tracking is connected, completed learning days will appear here.</span>
       </div>
     </section>
+  );
+}
+
+function BillingSection() {
+  return (
+    <section className="dashboard-tab-content billing-section">
+      <div className="dashboard-tab-heading">
+        <span className="eyebrow">SUBSCRIPTIONS AND ACCOUNT ACTIVITY</span>
+        <h1>Billing &amp; usage</h1>
+        <p>Manage your plan and find payment receipts in one place.</p>
+      </div>
+
+      <div className="billing-summary-grid">
+        <article className="billing-summary-card">
+          <span className="billing-summary-icon" aria-hidden="true">◇</span>
+          <div>
+            <span className="overview-card-kicker">YOUR PLAN</span>
+            <h2>Subscriptions are coming soon</h2>
+            <p>Plan options and subscription details will be available here when they launch.</p>
+          </div>
+          <span className="billing-status-badge">Coming soon</span>
+        </article>
+        <article className="billing-summary-card">
+          <span className="billing-summary-icon billing-usage-icon" aria-hidden="true">↗</span>
+          <div>
+            <span className="overview-card-kicker">USAGE</span>
+            <h2>Usage tracking is coming</h2>
+            <p>Your plan usage and limits will appear here once subscriptions are enabled.</p>
+          </div>
+        </article>
+      </div>
+
+      <section className="billing-receipts-card" aria-labelledby="billing-receipts-heading">
+        <div className="billing-receipts-heading">
+          <div>
+            <span className="overview-card-kicker">PAYMENT HISTORY</span>
+            <h2 id="billing-receipts-heading">Payment receipts</h2>
+            <p>Receipts for completed payments will be kept here for you to view later.</p>
+          </div>
+          <span className="billing-receipt-count">Receipt archive</span>
+        </div>
+        <div className="billing-empty-state" role="status">
+          <span className="billing-empty-icon" aria-hidden="true">
+            <Icon name="receipt" size={23} />
+          </span>
+          <h3>Receipt history will appear here</h3>
+          <p>Once subscription payments are enabled, receipts will be available here to view later.</p>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function AccountDialog({
+  account,
+  mode,
+  onClose,
+  onAccountUpdated,
+}: {
+  account: AuthenticatedAccount;
+  mode: AccountDialogMode;
+  onClose: () => void;
+  onAccountUpdated: (account: AuthenticatedAccount) => void;
+}) {
+  const [editingLearnerId, setEditingLearnerId] = useState<string>();
+  const [learnerNameInput, setLearnerNameInput] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSavingLearnerName, setIsSavingLearnerName] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage("");
+    setIsSaving(true);
+    try {
+      if (newPassword !== confirmPassword) {
+        throw new Error("The new passwords do not match.");
+      }
+      if (newPassword === currentPassword) {
+        throw new Error("Choose a new password that differs from the current password.");
+      }
+      await authApiRequest("change-password", {
+        method: "POST",
+        body: { current_password: currentPassword, new_password: newPassword },
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setMessage("Your password has been changed.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update your account.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function saveLearnerName(event: FormEvent<HTMLFormElement>, learnerId: string) {
+    event.preventDefault();
+    setMessage("");
+    setIsSavingLearnerName(true);
+    try {
+      if (!learnerNameInput.trim()) throw new Error("Learner name cannot be blank.");
+      const updatedAccount = await authApiRequest<AuthenticatedAccount>(
+        `learners/${encodeURIComponent(learnerId)}`,
+        {
+          method: "PATCH",
+          body: { display_name: learnerNameInput.trim() },
+        },
+      );
+      onAccountUpdated(updatedAccount);
+      setEditingLearnerId(undefined);
+      setMessage("Learner name updated.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Unable to update the learner name.");
+    } finally {
+      setIsSavingLearnerName(false);
+    }
+  }
+
+  const title = mode === "profile" ? "Profile" : "Change password";
+
+  return (
+    <div
+      className="account-dialog-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        aria-labelledby="account-dialog-title"
+        aria-modal="true"
+        className="account-dialog"
+        role="dialog"
+      >
+        <div className="account-dialog-heading">
+          <h2 id="account-dialog-title">{title}</h2>
+          <button
+            ref={closeButtonRef}
+            className="panel-close-button"
+            type="button"
+            aria-label="Close dialog"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+
+        {mode === "profile" ? (
+          <div className="account-profile-details">
+            <div><span>Guardian phone</span><strong>{account.phone}</strong></div>
+            <div><span>Email</span><strong>{account.email || "Not provided"}</strong></div>
+            <div className="account-profile-learners">
+              <span>Learner profiles</span>
+              {account.learners.length > 0 ? (
+                <ul>
+                  {account.learners.map((learner) => (
+                    <li key={learner.id}>
+                      {editingLearnerId === learner.id ? (
+                        <form
+                          className="account-learner-edit-form"
+                          onSubmit={(event) => void saveLearnerName(event, learner.id)}
+                        >
+                          <input
+                            autoFocus
+                            id={`learner-name-${learner.id}`}
+                            aria-label={`Learner name for ${learner.display_name}`}
+                            maxLength={120}
+                            required
+                            value={learnerNameInput}
+                            onChange={(event) => setLearnerNameInput(event.target.value)}
+                          />
+                          <div className="account-learner-edit-actions">
+                            <button type="button" disabled={isSavingLearnerName} onClick={() => setEditingLearnerId(undefined)}>
+                              Cancel
+                            </button>
+                            <button type="submit" disabled={isSavingLearnerName}>
+                              {isSavingLearnerName ? "Saving…" : "Save"}
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <>
+                          <span>{learner.display_name}</span>
+                          <button
+                            className="account-learner-edit-button"
+                            type="button"
+                            onClick={() => {
+                              setEditingLearnerId(learner.id);
+                              setLearnerNameInput(learner.display_name);
+                              setMessage("");
+                            }}
+                            aria-label={`Edit ${learner.display_name}`}
+                          >
+                            Edit
+                          </button>
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p>No learner profiles are linked to this account.</p>
+              )}
+            </div>
+            {message && (
+              <p className={message === "Learner name updated." ? "account-dialog-success" : "account-dialog-error"}
+                role={message === "Learner name updated." ? "status" : "alert"}>
+                {message}
+              </p>
+            )}
+            <button className="button button-primary" type="button" onClick={onClose}>Done</button>
+          </div>
+        ) : (
+          <form className="account-dialog-form" onSubmit={(event) => void handleSubmit(event)}>
+            <label>
+              Current password
+              <input
+                autoComplete="current-password"
+                required
+                type="password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+              />
+            </label>
+            <label>
+              New password
+              <input
+                autoComplete="new-password"
+                minLength={8}
+                required
+                type="password"
+                value={newPassword}
+                onChange={(event) => setNewPassword(event.target.value)}
+              />
+            </label>
+            <label>
+              Confirm new password
+              <input
+                autoComplete="new-password"
+                minLength={8}
+                required
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+              />
+            </label>
+            {message && (
+              <p className={message.startsWith("Your password") ? "account-dialog-success" : "account-dialog-error"}
+                role={message.startsWith("Your password") ? "status" : "alert"}>
+                {message}
+              </p>
+            )}
+            <div className="account-dialog-actions">
+              <button className="button button-secondary" type="button" onClick={onClose}>Cancel</button>
+              <button className="button button-primary" type="submit" disabled={isSaving}>
+                {isSaving && <ButtonSpinner />}
+                {isSaving ? "Saving…" : "Update password"}
+              </button>
+            </div>
+          </form>
+        )}
+      </section>
+    </div>
   );
 }

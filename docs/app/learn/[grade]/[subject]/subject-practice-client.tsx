@@ -42,7 +42,7 @@ type SubjectPracticeClientProps =
 export default function SubjectPracticeClient(props: SubjectPracticeClientProps) {
   if (props.mode === "language") {
     return (
-      <JuniorLanguageLearning
+      <LanguageLearning
         gradeId={props.gradeId}
         grade={props.grade}
         subject={props.subject}
@@ -72,7 +72,7 @@ export default function SubjectPracticeClient(props: SubjectPracticeClientProps)
   );
 }
 
-function JuniorLanguageLearning({
+function LanguageLearning({
   gradeId,
   grade,
   subject,
@@ -128,7 +128,7 @@ function JuniorLanguageLearning({
             <h1>{section === "writing" ? writingLabel : subject}</h1>
             <p>
               {section === "writing"
-                ? `Read these ten ${grade} model ${isKiswahili ? "inshas" : "compositions"} and notice how each one is organised.`
+                ? `Read these ${compositions.length} ${grade} model ${isKiswahili ? "inshas" : "compositions"} and notice how each one is organised.`
                 : `Choose how you would like to practise ${subject}.`}
             </p>
           </div>
@@ -251,8 +251,8 @@ function JuniorLanguageLearning({
             </div>
             <h2>Build your writing skills</h2>
             <p className="language-sidebar-copy">
-              Each grade has ten extended models. Look at the order of ideas, linking
-              words, punctuation and verb tenses, then practise writing your own version.
+              Explore {compositions.length} writing models for {grade}. Notice the order
+              of ideas, linking words, punctuation and verb tenses, then practise in your own words.
             </p>
             <div className="session-divider" />
             <p className="language-sidebar-label">FOR YOUR GRADE</p>
@@ -306,6 +306,7 @@ function JuniorPractice({
   const question = questionList[questionIndex] ?? questions[0];
   const isCorrect = selectedAnswer === question.correctAnswerIndex;
   const dashboardLabel = "Back to grade and subjects";
+  const canGenerateQuestions = /^grade-[789]$/.test(gradeId);
   const learnerSelectionRequired = learners.length > 1 && !selectedLearnerId;
   const canSaveProgress = accountStatus === "signed-in" && Boolean(selectedLearnerId);
   const isLoadingPractice =
@@ -644,7 +645,8 @@ function JuniorPractice({
           )}
           {accountStatus === "signed-out" && (
             <p className="practice-account-note" role="status">
-              <Link href="/login">Sign in</Link> to save progress across visits and generate more questions.
+              <Link href="/login">Sign in</Link> to save progress across visits
+              {canGenerateQuestions ? " and generate more questions" : ""}.
             </p>
           )}
           {isLoadingPractice && (
@@ -713,28 +715,34 @@ function JuniorPractice({
                     ? "Your practice activity is saved for this learner and subject."
                     : "This practice session is complete. Sign in if you want progress saved for future visits."}
                 </p>
-                <button
-                  type="button"
-                  className="button button-primary"
-                  onClick={generateMoreQuestions}
-                  disabled={isGenerating || remainingToday === 0 || learnerSelectionRequired}
-                >
-                  {isGenerating ? "Generating questions…" : "Generate 5 more questions"}
-                </button>
-                {generationError && (
-                  <p className="generation-error" role="alert">
-                    {generationError}
-                    {(generationError.startsWith("Sign in") ||
-                      generationError.startsWith("Choose a learner")) && (
-                      <> <Link href="/login">Sign in</Link></>
+                {canGenerateQuestions ? (
+                  <>
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      onClick={generateMoreQuestions}
+                      disabled={isGenerating || remainingToday === 0 || learnerSelectionRequired}
+                    >
+                      {isGenerating ? "Generating questions…" : "Generate 5 more questions"}
+                    </button>
+                    {generationError && (
+                      <p className="generation-error" role="alert">
+                        {generationError}
+                        {(generationError.startsWith("Sign in") ||
+                          generationError.startsWith("Choose a learner")) && (
+                          <> <Link href="/login">Sign in</Link></>
+                        )}
+                      </p>
                     )}
-                  </p>
+                    <p className="generation-limit">
+                      {quotaChecked
+                        ? `${remainingToday} generated questions remaining today.`
+                        : "Daily limit: up to 10 generated questions per learner. Sign-in required."}
+                    </p>
+                  </>
+                ) : (
+                  <p className="generation-limit">You’ve completed the available questions for this subject.</p>
                 )}
-                <p className="generation-limit">
-                  {quotaChecked
-                    ? `${remainingToday} generated questions remaining today.`
-                    : "Daily limit: up to 10 generated questions per learner. Sign-in required."}
-                </p>
                 <Link href="/dashboard" className="back-link">{dashboardLabel}</Link>
               </div>
             ) : (

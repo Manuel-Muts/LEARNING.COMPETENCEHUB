@@ -113,6 +113,40 @@ class QuestionGenerationSchemaTests(unittest.TestCase):
                 is_correct=True,
             )
 
+    def test_question_attempt_accepts_upper_primary_practice(self) -> None:
+        payload = RecordQuestionAttemptRequest(
+            learner_id=uuid4(),
+            grade_id="grade-4",
+            subject="Science and Technology",
+            source="bank",
+            question_key="bank-0",
+            is_correct=True,
+        )
+        self.assertEqual(payload.grade_id, "grade-4")
+        self.assertEqual(payload.subject, "Science and Technology")
+
+    def test_question_attempt_rejects_subjects_not_taught_in_grade_band(self) -> None:
+        with self.assertRaises(ValidationError):
+            RecordQuestionAttemptRequest(
+                learner_id=uuid4(),
+                grade_id="grade-4",
+                subject="Agriculture",
+                source="bank",
+                question_key="bank-0",
+                is_correct=True,
+            )
+
+    def test_generated_question_attempts_remain_junior_only(self) -> None:
+        with self.assertRaises(ValidationError):
+            RecordQuestionAttemptRequest(
+                learner_id=uuid4(),
+                grade_id="grade-6",
+                subject="Mathematics",
+                source="generated",
+                question_key="generated:00000000-0000-0000-0000-000000000001",
+                is_correct=True,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

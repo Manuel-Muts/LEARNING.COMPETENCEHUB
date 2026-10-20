@@ -67,6 +67,11 @@ class SettingsTests(unittest.TestCase):
             "https://bulksms.talksasa.com",
         )
 
+    def test_auth_cookie_defaults_support_cross_origin_production_frontends(self) -> None:
+        settings = self.make_settings()
+        self.assertTrue(settings.auth_cookie_secure)
+        self.assertEqual(settings.auth_cookie_samesite, "none")
+
     def test_default_cors_origins_allow_localhost_and_loopback(self) -> None:
         self.assertEqual(
             Settings.model_fields["cors_origins"].default,
